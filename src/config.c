@@ -44,6 +44,14 @@ gboolean config_load(ReelApp *app) {
     g_free(paths_str);
   }
 
+  /* UI theme preference */
+  if (g_key_file_has_key(keyfile, "ui", "theme", NULL)) {
+    gint theme = g_key_file_get_integer(keyfile, "ui", "theme", NULL);
+    if (theme >= THEME_SYSTEM && theme <= THEME_DARK) {
+      app->theme_preference = (ThemePreference)theme;
+    }
+  }
+
   g_key_file_free(keyfile);
   g_print("Configuration loaded from: %s\n", app->config_path);
   return TRUE;
@@ -68,6 +76,9 @@ gboolean config_save(ReelApp *app) {
     g_key_file_set_string(keyfile, "library", "paths", paths_str);
     g_free(paths_str);
   }
+
+  /* UI theme preference */
+  g_key_file_set_integer(keyfile, "ui", "theme", (gint)app->theme_preference);
 
   /* Write to file */
   GError *error = NULL;

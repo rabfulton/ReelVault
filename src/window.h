@@ -6,6 +6,9 @@
 /* Create the main application window */
 void window_create(ReelApp *app);
 
+/* Apply current theme to a toplevel widget (window/dialog) */
+void window_apply_theme(ReelApp *app, GtkWidget *toplevel);
+
 /* Update window state */
 void window_refresh_films(ReelApp *app);
 void window_update_status_bar(ReelApp *app);

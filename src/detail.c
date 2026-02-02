@@ -7,6 +7,7 @@
 #include "db.h"
 #include "match.h"
 #include "player.h"
+#include "window.h"
 #include <string.h>
 
 /* Callback for edit button */
@@ -27,6 +28,143 @@ static void on_play_clicked(GtkButton *btn, gpointer data) {
   player_launch(app, path);
 }
 
+static void refresh_detail(ReelApp *app, GtkWidget *dialog, gint64 film_id) {
+  gtk_widget_destroy(dialog);
+  window_refresh_films(app);
+  detail_show(app, film_id);
+}
+
+static void on_delete_clicked(GtkButton *btn, gpointer data) {
+  (void)data;
+  ReelApp *app = g_object_get_data(G_OBJECT(btn), "app");
+  gint64 film_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "film_id"));
+  GtkWidget *dialog = g_object_get_data(G_OBJECT(btn), "dialog");
+
+  GtkWidget *confirm = gtk_message_dialog_new(
+      GTK_WINDOW(dialog), GTK_DIALOG_MODAL, GTK_MESSAGE_WARNING,
+      GTK_BUTTONS_OK_CANCEL, "Delete this entry from the database?");
+  gtk_message_dialog_format_secondary_text(
+      GTK_MESSAGE_DIALOG(confirm),
+      "This removes the film/season and any associated data from the library.");
+
+  gint response = gtk_dialog_run(GTK_DIALOG(confirm));
+  gtk_widget_destroy(confirm);
+  if (response != GTK_RESPONSE_OK)
+    return;
+
+  if (!db_film_delete(app, film_id)) {
+    GtkWidget *err = gtk_message_dialog_new(GTK_WINDOW(dialog),
+                                           GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR,
+                                           GTK_BUTTONS_OK,
+                                           "Failed to delete entry.");
+    gtk_dialog_run(GTK_DIALOG(err));
+    gtk_widget_destroy(err);
+    return;
+  }
+
+  gtk_widget_destroy(dialog);
+  window_refresh_films(app);
+}
+
+static void on_remove_file_clicked(GtkButton *btn, gpointer data) {
+  (void)data;
+  ReelApp *app = g_object_get_data(G_OBJECT(btn), "app");
+  GtkWidget *dialog = g_object_get_data(G_OBJECT(btn), "dialog");
+  gint64 film_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "film_id"));
+  gint64 file_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "file_id"));
+
+  GtkWidget *confirm = gtk_message_dialog_new(
+      GTK_WINDOW(dialog), GTK_DIALOG_MODAL, GTK_MESSAGE_WARNING,
+      GTK_BUTTONS_OK_CANCEL, "Remove this file from the entry?");
+
+  gint response = gtk_dialog_run(GTK_DIALOG(confirm));
+  gtk_widget_destroy(confirm);
+  if (response != GTK_RESPONSE_OK)
+    return;
+
+  if (!db_film_file_delete(app, file_id)) {
+    GtkWidget *err = gtk_message_dialog_new(GTK_WINDOW(dialog),
+                                           GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR,
+                                           GTK_BUTTONS_OK,
+                                           "Failed to remove file.");
+    gtk_dialog_run(GTK_DIALOG(err));
+    gtk_widget_destroy(err);
+    return;
+  }
+
+  refresh_detail(app, dialog, film_id);
+}
+
+static void on_add_file_clicked(GtkButton *btn, gpointer data) {
+  (void)data;
+  ReelApp *app = g_object_get_data(G_OBJECT(btn), "app");
+  GtkWidget *dialog = g_object_get_data(G_OBJECT(btn), "dialog");
+  gint64 film_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "film_id"));
+
+  GtkWidget *chooser = gtk_file_chooser_dialog_new(
+      "Attach File", GTK_WINDOW(dialog), GTK_FILE_CHOOSER_ACTION_OPEN, "_Cancel",
+      GTK_RESPONSE_CANCEL, "_Attach", GTK_RESPONSE_ACCEPT, NULL);
+
+  Film *film = db_film_get_by_id(app, film_id);
+  if (film && film->file_path) {
+    gchar *dir = g_path_get_dirname(film->file_path);
+    gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(chooser), dir);
+    g_free(dir);
+  }
+  film_free(film);
+
+  gint response = gtk_dialog_run(GTK_DIALOG(chooser));
+  if (response != GTK_RESPONSE_ACCEPT) {
+    gtk_widget_destroy(chooser);
+    return;
+  }
+
+  gchar *path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(chooser));
+  gtk_widget_destroy(chooser);
+  if (!path)
+    return;
+
+  Film *existing = db_film_get_by_path(app, path);
+  if (existing && existing->id != film_id) {
+    GtkWidget *confirm = gtk_message_dialog_new(
+        GTK_WINDOW(dialog), GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION,
+        GTK_BUTTONS_OK_CANCEL,
+        "That file already exists as a separate entry.\nMerge it into this one?");
+    gtk_message_dialog_format_secondary_text(
+        GTK_MESSAGE_DIALOG(confirm),
+        "The other entry will be removed and its file will be attached here.");
+    gint merge_resp = gtk_dialog_run(GTK_DIALOG(confirm));
+    gtk_widget_destroy(confirm);
+    if (merge_resp != GTK_RESPONSE_OK) {
+      film_free(existing);
+      g_free(path);
+      return;
+    }
+  }
+
+  if (!db_film_file_attach(app, film_id, path, NULL, 0)) {
+    GtkWidget *err = gtk_message_dialog_new(
+        GTK_WINDOW(dialog), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+        "Failed to attach file.");
+    gtk_dialog_run(GTK_DIALOG(err));
+    gtk_widget_destroy(err);
+    if (existing)
+      film_free(existing);
+    g_free(path);
+    return;
+  }
+
+  if (existing && existing->id != film_id) {
+    db_film_delete(app, existing->id);
+    film_free(existing);
+  } else if (existing) {
+    film_free(existing);
+  }
+
+  g_free(path);
+  refresh_detail(app, dialog, film_id);
+}
+
 void detail_show(ReelApp *app, gint64 film_id) {
   Film *film = db_film_get_by_id(app, film_id);
   if (film == NULL) {
@@ -39,6 +177,7 @@ void detail_show(ReelApp *app, gint64 film_id) {
   GtkWidget *dialog = gtk_dialog_new_with_buttons(
       dialog_title, GTK_WINDOW(app->window),
       GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, NULL, NULL);
+  window_apply_theme(app, dialog);
 
   gtk_window_set_default_size(GTK_WINDOW(dialog), 700, 500);
 
@@ -195,20 +334,127 @@ void detail_show(ReelApp *app, gint64 film_id) {
     gtk_box_pack_start(GTK_BOX(info_box), plot_text, FALSE, FALSE, 0);
   }
 
+  /* Episodes (for TV Season) */
+  if (film->media_type == MEDIA_TV_SEASON) {
+    GtkWidget *ep_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(ep_label), "<b>Episodes:</b>");
+    gtk_label_set_xalign(GTK_LABEL(ep_label), 0);
+    gtk_widget_set_margin_top(ep_label, 12);
+    gtk_box_pack_start(GTK_BOX(info_box), ep_label, FALSE, FALSE, 0);
+
+    GtkWidget *scrolled = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_size_request(scrolled, -1, 150);
+    gtk_box_pack_start(GTK_BOX(info_box), scrolled, TRUE, TRUE, 4);
+
+    GtkWidget *ep_list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_container_add(GTK_CONTAINER(scrolled), ep_list);
+
+    GList *episodes = db_episodes_get_for_season(app, film->id);
+    if (episodes) {
+      for (GList *l = episodes; l != NULL; l = l->next) {
+        Episode *ep = (Episode *)l->data;
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+
+        gchar *ep_text = g_strdup_printf("<b>%d.</b> %s", ep->episode_number,
+                                         ep->title ? ep->title : "Episode");
+        GtkWidget *lbl = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(lbl), ep_text);
+        gtk_label_set_xalign(GTK_LABEL(lbl), 0);
+        gtk_label_set_ellipsize(GTK_LABEL(lbl), PANGO_ELLIPSIZE_END);
+        gtk_box_pack_start(GTK_BOX(row), lbl, TRUE, TRUE, 0);
+        g_free(ep_text);
+
+        GtkWidget *play_ep = gtk_button_new_from_icon_name(
+            "media-playback-start-symbolic", GTK_ICON_SIZE_BUTTON);
+        gtk_widget_set_tooltip_text(play_ep, "Play Episode");
+        g_object_set_data_full(G_OBJECT(play_ep), "file_path",
+                               g_strdup(ep->file_path), g_free);
+        g_object_set_data(G_OBJECT(play_ep), "app", app);
+        g_signal_connect(play_ep, "clicked", G_CALLBACK(on_play_clicked), NULL);
+        gtk_box_pack_end(GTK_BOX(row), play_ep, FALSE, FALSE, 0);
+
+        gtk_box_pack_start(GTK_BOX(ep_list), row, FALSE, FALSE, 2);
+      }
+      g_list_free_full(episodes, (GDestroyNotify)episode_free);
+    } else {
+      GtkWidget *no_eps = gtk_label_new("No episodes found.");
+      gtk_label_set_xalign(GTK_LABEL(no_eps), 0);
+      gtk_box_pack_start(GTK_BOX(ep_list), no_eps, FALSE, FALSE, 0);
+    }
+  }
+
   /* Spacer */
   GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
   gtk_widget_set_vexpand(spacer, TRUE);
   gtk_box_pack_start(GTK_BOX(info_box), spacer, TRUE, TRUE, 0);
 
-  /* File path */
-  GtkWidget *file_frame = gtk_frame_new("File");
+  /* File(s) */
+  GtkWidget *file_frame =
+      gtk_frame_new(film->media_type == MEDIA_FILM ? "Files" : "File");
   gtk_box_pack_start(GTK_BOX(content), file_frame, FALSE, FALSE, 0);
+
+  GtkWidget *files_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+  gtk_container_add(GTK_CONTAINER(file_frame), files_box);
+  gtk_container_set_border_width(GTK_CONTAINER(file_frame), 6);
+
+  /* Primary file row */
+  GtkWidget *primary_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+  gtk_box_pack_start(GTK_BOX(files_box), primary_row, FALSE, FALSE, 0);
 
   GtkWidget *file_label = gtk_label_new(film->file_path);
   gtk_label_set_selectable(GTK_LABEL(file_label), TRUE);
-  gtk_label_set_ellipsize(GTK_LABEL(file_label), PANGO_ELLIPSIZE_START);
-  gtk_container_add(GTK_CONTAINER(file_frame), file_label);
-  gtk_container_set_border_width(GTK_CONTAINER(file_frame), 6);
+  gtk_label_set_ellipsize(GTK_LABEL(file_label), PANGO_ELLIPSIZE_MIDDLE);
+  gtk_label_set_xalign(GTK_LABEL(file_label), 0);
+  gtk_box_pack_start(GTK_BOX(primary_row), file_label, TRUE, TRUE, 0);
+
+  if (film->media_type == MEDIA_FILM) {
+    GtkWidget *play_primary = gtk_button_new_with_label("Play");
+    g_object_set_data_full(G_OBJECT(play_primary), "file_path",
+                           g_strdup(film->file_path), g_free);
+    g_object_set_data(G_OBJECT(play_primary), "app", app);
+    g_signal_connect(play_primary, "clicked", G_CALLBACK(on_play_clicked), NULL);
+    gtk_box_pack_end(GTK_BOX(primary_row), play_primary, FALSE, FALSE, 0);
+  }
+
+  /* Attached files (movies only) */
+  if (film->media_type == MEDIA_FILM) {
+    GList *files = db_film_files_get(app, film_id);
+    for (GList *l = files; l != NULL; l = l->next) {
+      FilmFile *ff = (FilmFile *)l->data;
+
+      GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+      gtk_box_pack_start(GTK_BOX(files_box), row, FALSE, FALSE, 0);
+
+      const gchar *display = ff->label && strlen(ff->label) > 0
+                                 ? ff->label
+                                 : ff->file_path;
+      GtkWidget *lbl = gtk_label_new(display);
+      gtk_label_set_selectable(GTK_LABEL(lbl), TRUE);
+      gtk_label_set_ellipsize(GTK_LABEL(lbl), PANGO_ELLIPSIZE_MIDDLE);
+      gtk_label_set_xalign(GTK_LABEL(lbl), 0);
+      gtk_box_pack_start(GTK_BOX(row), lbl, TRUE, TRUE, 0);
+
+      GtkWidget *play_btn = gtk_button_new_with_label("Play");
+      g_object_set_data_full(G_OBJECT(play_btn), "file_path",
+                             g_strdup(ff->file_path), g_free);
+      g_object_set_data(G_OBJECT(play_btn), "app", app);
+      g_signal_connect(play_btn, "clicked", G_CALLBACK(on_play_clicked), NULL);
+      gtk_box_pack_end(GTK_BOX(row), play_btn, FALSE, FALSE, 0);
+
+      GtkWidget *remove_btn = gtk_button_new_with_label("Remove");
+      g_object_set_data(G_OBJECT(remove_btn), "app", app);
+      g_object_set_data(G_OBJECT(remove_btn), "dialog", dialog);
+      g_object_set_data(G_OBJECT(remove_btn), "film_id", GINT_TO_POINTER(film_id));
+      g_object_set_data(G_OBJECT(remove_btn), "file_id",
+                        GINT_TO_POINTER(ff->id));
+      g_signal_connect(remove_btn, "clicked", G_CALLBACK(on_remove_file_clicked),
+                       NULL);
+      gtk_box_pack_end(GTK_BOX(row), remove_btn, FALSE, FALSE, 0);
+    }
+    g_list_free_full(files, (GDestroyNotify)film_file_free);
+  }
 
   /* Button box */
   GtkWidget *btn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
@@ -230,16 +476,23 @@ void detail_show(ReelApp *app, gint64 film_id) {
   g_signal_connect(edit_btn, "clicked", G_CALLBACK(on_edit_match_clicked),
                    NULL);
 
-  /* Play button */
-  GtkWidget *play_btn = gtk_button_new_with_label("▶ Play");
-  GtkStyleContext *play_ctx = gtk_widget_get_style_context(play_btn);
-  gtk_style_context_add_class(play_ctx, "suggested-action");
-  gtk_box_pack_end(GTK_BOX(btn_box), play_btn, FALSE, FALSE, 0);
+  /* Play button (Only for Movies) */
+  if (film->media_type == MEDIA_FILM) {
+    GtkWidget *add_btn = gtk_button_new_with_label("Add File...");
+    gtk_box_pack_start(GTK_BOX(btn_box), add_btn, FALSE, FALSE, 0);
+    g_object_set_data(G_OBJECT(add_btn), "app", app);
+    g_object_set_data(G_OBJECT(add_btn), "dialog", dialog);
+    g_object_set_data(G_OBJECT(add_btn), "film_id", GINT_TO_POINTER(film_id));
+    g_signal_connect(add_btn, "clicked", G_CALLBACK(on_add_file_clicked), NULL);
+  }
 
-  g_object_set_data_full(G_OBJECT(play_btn), "file_path",
-                         g_strdup(film->file_path), g_free);
-  g_object_set_data(G_OBJECT(play_btn), "app", app);
-  g_signal_connect(play_btn, "clicked", G_CALLBACK(on_play_clicked), NULL);
+  /* Delete button */
+  GtkWidget *delete_btn = gtk_button_new_with_label("Delete");
+  gtk_box_pack_start(GTK_BOX(btn_box), delete_btn, FALSE, FALSE, 0);
+  g_object_set_data(G_OBJECT(delete_btn), "app", app);
+  g_object_set_data(G_OBJECT(delete_btn), "dialog", dialog);
+  g_object_set_data(G_OBJECT(delete_btn), "film_id", GINT_TO_POINTER(film_id));
+  g_signal_connect(delete_btn, "clicked", G_CALLBACK(on_delete_clicked), NULL);
 
   gtk_widget_show_all(dialog);
 

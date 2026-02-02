@@ -189,12 +189,28 @@ Film *film_copy(const Film *film) {
   copy->rating = film->rating;
   copy->added_date = film->added_date;
   copy->match_status = film->match_status;
+  copy->media_type = film->media_type;
+  copy->season_number = film->season_number;
 
   if (film->poster_pixbuf) {
     copy->poster_pixbuf = g_object_ref(film->poster_pixbuf);
   }
 
   return copy;
+}
+
+Episode *episode_new(void) { return g_new0(Episode, 1); }
+
+void episode_free(Episode *episode) {
+  if (episode == NULL)
+    return;
+
+  g_free(episode->title);
+  g_free(episode->file_path);
+  g_free(episode->plot);
+  g_free(episode->air_date);
+
+  g_free(episode);
 }
 
 /* Filter state */

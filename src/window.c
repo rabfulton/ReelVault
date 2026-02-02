@@ -19,6 +19,29 @@ static void on_scan_clicked(GtkButton *button, gpointer user_data);
 static void on_settings_clicked(GtkButton *button, gpointer user_data);
 static void on_unmatched_clicked(GtkButton *button, gpointer user_data);
 
+void window_apply_theme(ReelApp *app, GtkWidget *toplevel) {
+  if (!toplevel)
+    return;
+
+  GtkStyleContext *ctx = gtk_widget_get_style_context(toplevel);
+  gtk_style_context_remove_class(ctx, "dark-theme");
+  gtk_style_context_remove_class(ctx, "light-theme");
+
+  if (app->theme_preference == THEME_DARK) {
+    gtk_style_context_add_class(ctx, "dark-theme");
+  } else if (app->theme_preference == THEME_LIGHT) {
+    gtk_style_context_add_class(ctx, "light-theme");
+  }
+
+  gboolean prefer_dark = (app->theme_preference == THEME_DARK);
+  /* For THEME_SYSTEM, avoid forcing a dark variant. */
+  if (app->theme_preference == THEME_SYSTEM)
+    prefer_dark = FALSE;
+
+  g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme",
+               prefer_dark, NULL);
+}
+
 void window_create(ReelApp *app) {
   /* Get DPI scale factor from GDK */
   GdkScreen *screen = gdk_screen_get_default();
@@ -118,11 +141,11 @@ static void apply_theme_css(ReelApp *app) {
   gchar *css_str = g_strdup_printf(
       /* ===== LIGHT/DARK ADAPTIVE THEME ===== */
 
-      /* Poster grid items */
+      /* Poster grid items - tight spacing */
       "flowbox > flowboxchild {"
-      "    margin: 8px;"
-      "    padding: 8px;"
-      "    border-radius: 8px;"
+      "    margin: 2px;"
+      "    padding: 4px;"
+      "    border-radius: 6px;"
       "    transition: all 200ms ease;"
       "}"
       "flowbox > flowboxchild:hover {"
@@ -224,6 +247,20 @@ static void apply_theme_css(ReelApp *app) {
       ".light-theme statusbar {"
       "    background-color: #dce0e8;"
       "    color: #5c5f77;"
+      "}"
+
+      /* Ensure common widgets look coherent when we force a light/dark class. */
+      ".dark-theme button,"
+      ".dark-theme combobox,"
+      ".dark-theme entry,"
+      ".dark-theme spinbutton {"
+      "    color: #cdd6f4;"
+      "}"
+      ".light-theme button,"
+      ".light-theme combobox,"
+      ".light-theme entry,"
+      ".light-theme spinbutton {"
+      "    color: #4c4f69;"
       "}",
       base_font, small_font, badge_font, small_font);
 
@@ -235,16 +272,8 @@ static void apply_theme_css(ReelApp *app) {
       GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
   g_object_unref(css);
 
-  /* Apply initial theme class based on preference */
-  GtkStyleContext *ctx = gtk_widget_get_style_context(app->window);
-  if (app->theme_preference == THEME_DARK) {
-    gtk_style_context_add_class(ctx, "dark-theme");
-    gtk_style_context_remove_class(ctx, "light-theme");
-  } else if (app->theme_preference == THEME_LIGHT) {
-    gtk_style_context_add_class(ctx, "light-theme");
-    gtk_style_context_remove_class(ctx, "dark-theme");
-  }
-  /* THEME_SYSTEM: let GTK handle it */
+  /* Apply initial theme based on preference */
+  window_apply_theme(app, app->window);
 }
 
 /* Theme toggle callback */
@@ -252,29 +281,17 @@ static void on_theme_toggle_clicked(GtkButton *button, gpointer user_data) {
   (void)button;
   ReelApp *app = (ReelApp *)user_data;
 
-  GtkStyleContext *ctx = gtk_widget_get_style_context(app->window);
-
   /* Cycle through: System -> Dark -> Light -> System */
   if (app->theme_preference == THEME_SYSTEM) {
     app->theme_preference = THEME_DARK;
-    gtk_style_context_add_class(ctx, "dark-theme");
-    gtk_style_context_remove_class(ctx, "light-theme");
-
-    /* Also tell GTK to prefer dark */
-    g_object_set(gtk_settings_get_default(),
-                 "gtk-application-prefer-dark-theme", TRUE, NULL);
   } else if (app->theme_preference == THEME_DARK) {
     app->theme_preference = THEME_LIGHT;
-    gtk_style_context_add_class(ctx, "light-theme");
-    gtk_style_context_remove_class(ctx, "dark-theme");
-
-    g_object_set(gtk_settings_get_default(),
-                 "gtk-application-prefer-dark-theme", FALSE, NULL);
   } else {
     app->theme_preference = THEME_SYSTEM;
-    gtk_style_context_remove_class(ctx, "dark-theme");
-    gtk_style_context_remove_class(ctx, "light-theme");
   }
+
+  window_apply_theme(app, app->window);
+  config_save(app);
 }
 
 void window_refresh_films(ReelApp *app) {
@@ -370,6 +387,7 @@ void window_show_settings(ReelApp *app) {
       GTK_RESPONSE_CANCEL, "_Save", GTK_RESPONSE_ACCEPT, NULL);
 
   gtk_window_set_default_size(GTK_WINDOW(dialog), 500, 400);
+  window_apply_theme(app, dialog);
 
   GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
   gtk_container_set_border_width(GTK_CONTAINER(content), 12);
@@ -470,6 +488,7 @@ void window_scan_library(ReelApp *app) {
   GtkWidget *dialog = gtk_message_dialog_new(
       GTK_WINDOW(app->window), GTK_DIALOG_MODAL, GTK_MESSAGE_INFO,
       GTK_BUTTONS_NONE, "Scanning library...");
+  window_apply_theme(app, dialog);
   gtk_widget_show(dialog);
 
   /* Process events to show dialog */
@@ -492,6 +511,7 @@ void window_scan_library(ReelApp *app) {
       "Scan complete.\nFound %d new films.\n\nUse the unmatched button to "
       "review films that need matching.",
       new_films);
+  window_apply_theme(app, result);
   gtk_dialog_run(GTK_DIALOG(result));
   gtk_widget_destroy(result);
 
@@ -522,6 +542,7 @@ void window_show_unmatched(ReelApp *app) {
     GtkWidget *dialog = gtk_message_dialog_new(
         GTK_WINDOW(app->window), GTK_DIALOG_MODAL, GTK_MESSAGE_INFO,
         GTK_BUTTONS_OK, "All films are matched!");
+    window_apply_theme(app, dialog);
     gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
     g_list_free_full(unmatched, (GDestroyNotify)film_free);
@@ -535,6 +556,7 @@ void window_show_unmatched(ReelApp *app) {
       GTK_RESPONSE_CLOSE, NULL);
 
   gtk_window_set_default_size(GTK_WINDOW(dialog), 600, 400);
+  window_apply_theme(app, dialog);
 
   GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 

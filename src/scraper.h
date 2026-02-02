@@ -22,6 +22,9 @@ void scraper_stop(ReelApp *app);
 /* Search TMDB for a film (synchronous) */
 GList *scraper_search_tmdb(ReelApp *app, const gchar *query, gint year);
 
+/* Search TMDB for a TV series (synchronous) */
+GList *scraper_search_tv(ReelApp *app, const gchar *query, gint year);
+
 /* Fetch full details and update film in database */
 gboolean scraper_fetch_and_update(ReelApp *app, gint64 film_id, gint tmdb_id);
 

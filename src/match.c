@@ -12,6 +12,7 @@
 typedef struct {
   ReelApp *app;
   gint64 film_id;
+  MediaType media_type;
   GtkWidget *dialog;
   GtkWidget *search_entry;
   GtkWidget *results_list;
@@ -38,12 +39,16 @@ void match_show(ReelApp *app, gint64 film_id) {
   MatchDialogContext *ctx = g_new0(MatchDialogContext, 1);
   ctx->app = app;
   ctx->film_id = film_id;
+  ctx->media_type = film->media_type;
 
   /* Create dialog */
+  const gchar *title =
+      (film->media_type == MEDIA_TV_SEASON) ? "Match TV Season" : "Match Film";
   ctx->dialog = gtk_dialog_new_with_buttons(
-      "Match Film", GTK_WINDOW(app->window),
+      title, GTK_WINDOW(app->window),
       GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, "_Cancel",
       GTK_RESPONSE_CANCEL, NULL);
+  window_apply_theme(app, ctx->dialog);
 
   gtk_window_set_default_size(GTK_WINDOW(ctx->dialog), 600, 400);
 
@@ -66,8 +71,9 @@ void match_show(ReelApp *app, gint64 film_id) {
   gtk_box_pack_start(GTK_BOX(content), search_box, FALSE, FALSE, 0);
 
   ctx->search_entry = gtk_entry_new();
-  gtk_entry_set_placeholder_text(GTK_ENTRY(ctx->search_entry),
-                                 "Search TMDB...");
+  gtk_entry_set_placeholder_text(
+      GTK_ENTRY(ctx->search_entry),
+      (film->media_type == MEDIA_TV_SEASON) ? "Search TMDB TV..." : "Search TMDB...");
   if (film->title) {
     gtk_entry_set_text(GTK_ENTRY(ctx->search_entry), film->title);
   }
@@ -153,7 +159,11 @@ static void on_search_clicked(GtkButton *button, gpointer user_data) {
   clear_results(ctx);
 
   /* Search TMDB */
-  ctx->search_results = scraper_search_tmdb(ctx->app, query, 0);
+  if (ctx->media_type == MEDIA_TV_SEASON) {
+    ctx->search_results = scraper_search_tv(ctx->app, query, 0);
+  } else {
+    ctx->search_results = scraper_search_tmdb(ctx->app, query, 0);
+  }
 
   if (!ctx->search_results) {
     GtkWidget *label = gtk_label_new("No results found");

@@ -33,11 +33,9 @@ static GtkWidget *create_poster_widget(ReelApp *app, Film *film) {
   gint poster_height = get_scaled_height(app);
   gint font_size = get_scaled_font_size(app);
 
-  /* Outer box */
-  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
-  gtk_widget_set_size_request(box, poster_width + 16, -1); /* Add padding */
-  gtk_widget_set_margin_start(box, 4);
-  gtk_widget_set_margin_end(box, 4);
+  /* Outer box - tight spacing */
+  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+  gtk_widget_set_size_request(box, poster_width, -1);
 
   /* Overlay for poster + badge */
   GtkWidget *overlay = gtk_overlay_new();
@@ -154,12 +152,12 @@ GtkWidget *grid_create(ReelApp *app) {
   gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(flowbox), FALSE);
   gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(flowbox), GTK_SELECTION_SINGLE);
   gtk_flow_box_set_activate_on_single_click(GTK_FLOW_BOX(flowbox), TRUE);
-  gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(flowbox), 8);
-  gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flowbox), 16);
-  gtk_widget_set_margin_start(flowbox, 16);
-  gtk_widget_set_margin_end(flowbox, 16);
-  gtk_widget_set_margin_top(flowbox, 16);
-  gtk_widget_set_margin_bottom(flowbox, 16);
+  gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(flowbox), 4);
+  gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flowbox), 8);
+  gtk_widget_set_margin_start(flowbox, 8);
+  gtk_widget_set_margin_end(flowbox, 8);
+  gtk_widget_set_margin_top(flowbox, 8);
+  gtk_widget_set_margin_bottom(flowbox, 8);
 
   /* Reasonable limits for grid columns */
   gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(flowbox), 2);

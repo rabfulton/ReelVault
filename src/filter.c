@@ -28,6 +28,9 @@ GtkWidget *filter_bar_create(ReelApp *app) {
   gtk_widget_set_margin_top(bar, 8);
   gtk_widget_set_margin_bottom(bar, 8);
 
+  GtkStyleContext *ctx = gtk_widget_get_style_context(bar);
+  gtk_style_context_add_class(ctx, "filter-bar");
+
   FilterWidgets *widgets = g_new0(FilterWidgets, 1);
   g_object_set_data_full(G_OBJECT(bar), "widgets", widgets, g_free);
   g_object_set_data(G_OBJECT(bar), "app", app);

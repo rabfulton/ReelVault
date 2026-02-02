@@ -5,6 +5,14 @@
 #include <glib.h>
 #include <sqlite3.h>
 
+typedef struct {
+  gint64 id;
+  gint64 film_id;
+  gchar *file_path;
+  gchar *label;
+  gint sort_order;
+} FilmFile;
+
 /* Database initialization */
 gboolean db_init(ReelApp *app);
 void db_close(ReelApp *app);
@@ -21,6 +29,24 @@ GList *db_films_get_all(ReelApp *app, const FilterState *filter);
 GList *db_films_get_unmatched(ReelApp *app);
 gint db_films_count(ReelApp *app);
 gint db_films_count_unmatched(ReelApp *app);
+
+/* Additional file attachments (multi-part, alternate cuts) */
+gboolean db_film_file_attach(ReelApp *app, gint64 film_id,
+                             const gchar *file_path, const gchar *label,
+                             gint sort_order);
+gboolean db_film_file_delete(ReelApp *app, gint64 film_file_id);
+GList *db_film_files_get(ReelApp *app, gint64 film_id);
+void film_file_free(FilmFile *file);
+
+/* Fast check for any tracked path */
+gboolean db_is_file_tracked(ReelApp *app, const gchar *file_path);
+
+/* Episode CRUD operations (for TV seasons) */
+gboolean db_episode_insert(ReelApp *app, Episode *episode);
+gboolean db_episode_update(ReelApp *app, const Episode *episode);
+GList *db_episodes_get_for_season(ReelApp *app, gint64 season_id);
+Episode *db_episode_get_by_path(ReelApp *app, const gchar *file_path);
+gint db_episodes_count_for_season(ReelApp *app, gint64 season_id);
 
 /* Genre operations */
 gboolean db_genre_add_to_film(ReelApp *app, gint64 film_id, const gchar *genre);

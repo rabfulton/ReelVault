@@ -21,7 +21,29 @@ static const char *SCHEMA_SQL =
     "    imdb_id TEXT,"
     "    rating REAL,"
     "    added_date INTEGER,"
-    "    match_status INTEGER DEFAULT 0"
+    "    match_status INTEGER DEFAULT 0,"
+    "    media_type INTEGER DEFAULT 0,"
+    "    season_number INTEGER DEFAULT 0"
+    ");"
+
+    "CREATE TABLE IF NOT EXISTS film_files ("
+    "    id INTEGER PRIMARY KEY,"
+    "    film_id INTEGER REFERENCES films(id) ON DELETE CASCADE,"
+    "    file_path TEXT UNIQUE NOT NULL,"
+    "    label TEXT,"
+    "    sort_order INTEGER DEFAULT 0"
+    ");"
+
+    "CREATE TABLE IF NOT EXISTS episodes ("
+    "    id INTEGER PRIMARY KEY,"
+    "    season_id INTEGER REFERENCES films(id) ON DELETE CASCADE,"
+    "    episode_number INTEGER,"
+    "    title TEXT,"
+    "    file_path TEXT UNIQUE,"
+    "    runtime_minutes INTEGER,"
+    "    plot TEXT,"
+    "    tmdb_id INTEGER,"
+    "    air_date TEXT"
     ");"
 
     "CREATE TABLE IF NOT EXISTS genres ("
@@ -64,7 +86,8 @@ static const char *SCHEMA_SQL =
     "CREATE INDEX IF NOT EXISTS idx_films_year ON films(year);"
     "CREATE INDEX IF NOT EXISTS idx_films_title ON films(title);"
     "CREATE INDEX IF NOT EXISTS idx_films_match_status ON films(match_status);"
-    "CREATE INDEX IF NOT EXISTS idx_films_tmdb_id ON films(tmdb_id);";
+    "CREATE INDEX IF NOT EXISTS idx_films_tmdb_id ON films(tmdb_id);"
+    "CREATE INDEX IF NOT EXISTS idx_film_files_film_id ON film_files(film_id);";
 
 gboolean db_init(ReelApp *app) {
   int rc = sqlite3_open(app->db_path, &app->db);
@@ -91,6 +114,15 @@ gboolean db_init(ReelApp *app) {
     return FALSE;
   }
 
+  /* Migration: Add new columns if they don't exist (ignore errors if they do)
+   */
+  sqlite3_exec(app->db,
+               "ALTER TABLE films ADD COLUMN media_type INTEGER DEFAULT 0",
+               NULL, NULL, NULL);
+  sqlite3_exec(app->db,
+               "ALTER TABLE films ADD COLUMN season_number INTEGER DEFAULT 0",
+               NULL, NULL, NULL);
+
   g_print("Database initialized: %s\n", app->db_path);
   return TRUE;
 }
@@ -107,8 +139,9 @@ void db_close(ReelApp *app) {
 gboolean db_film_insert(ReelApp *app, Film *film) {
   const char *sql =
       "INSERT INTO films (file_path, title, year, runtime_minutes, plot, "
-      "poster_path, tmdb_id, imdb_id, rating, added_date, match_status) "
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+      "poster_path, tmdb_id, imdb_id, rating, added_date, match_status, "
+      "media_type, season_number) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
   sqlite3_stmt *stmt;
   int rc = sqlite3_prepare_v2(app->db, sql, -1, &stmt, NULL);
@@ -128,6 +161,8 @@ gboolean db_film_insert(ReelApp *app, Film *film) {
   sqlite3_bind_double(stmt, 9, film->rating);
   sqlite3_bind_int64(stmt, 10, film->added_date);
   sqlite3_bind_int(stmt, 11, film->match_status);
+  sqlite3_bind_int(stmt, 12, film->media_type);
+  sqlite3_bind_int(stmt, 13, film->season_number);
 
   rc = sqlite3_step(stmt);
   if (rc != SQLITE_DONE) {
@@ -144,7 +179,8 @@ gboolean db_film_insert(ReelApp *app, Film *film) {
 gboolean db_film_update(ReelApp *app, const Film *film) {
   const char *sql =
       "UPDATE films SET title=?, year=?, runtime_minutes=?, plot=?, "
-      "poster_path=?, tmdb_id=?, imdb_id=?, rating=?, match_status=? "
+      "poster_path=?, tmdb_id=?, imdb_id=?, rating=?, match_status=?, "
+      "media_type=?, season_number=? "
       "WHERE id=?";
 
   sqlite3_stmt *stmt;
@@ -163,7 +199,9 @@ gboolean db_film_update(ReelApp *app, const Film *film) {
   sqlite3_bind_text(stmt, 7, film->imdb_id, -1, SQLITE_STATIC);
   sqlite3_bind_double(stmt, 8, film->rating);
   sqlite3_bind_int(stmt, 9, film->match_status);
-  sqlite3_bind_int64(stmt, 10, film->id);
+  sqlite3_bind_int(stmt, 10, film->media_type);
+  sqlite3_bind_int(stmt, 11, film->season_number);
+  sqlite3_bind_int64(stmt, 12, film->id);
 
   rc = sqlite3_step(stmt);
   sqlite3_finalize(stmt);
@@ -202,7 +240,111 @@ static Film *film_from_row(sqlite3_stmt *stmt) {
   film->added_date = sqlite3_column_int64(stmt, 10);
   film->match_status = sqlite3_column_int(stmt, 11);
 
+  /* Check for new columns (indices 12 and 13) */
+  if (sqlite3_column_count(stmt) > 12) {
+    film->media_type = sqlite3_column_int(stmt, 12);
+    film->season_number = sqlite3_column_int(stmt, 13);
+  }
+
   return film;
+}
+
+static FilmFile *film_file_from_row(sqlite3_stmt *stmt) {
+  FilmFile *file = g_new0(FilmFile, 1);
+  file->id = sqlite3_column_int64(stmt, 0);
+  file->film_id = sqlite3_column_int64(stmt, 1);
+  file->file_path = g_strdup((const gchar *)sqlite3_column_text(stmt, 2));
+  file->label = g_strdup((const gchar *)sqlite3_column_text(stmt, 3));
+  file->sort_order = sqlite3_column_int(stmt, 4);
+  return file;
+}
+
+void film_file_free(FilmFile *file) {
+  if (!file)
+    return;
+  g_free(file->file_path);
+  g_free(file->label);
+  g_free(file);
+}
+
+gboolean db_film_file_attach(ReelApp *app, gint64 film_id,
+                             const gchar *file_path, const gchar *label,
+                             gint sort_order) {
+  const char *sql = "INSERT OR IGNORE INTO film_files (film_id, file_path, "
+                    "label, sort_order) VALUES (?, ?, ?, ?)";
+
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(app->db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK)
+    return FALSE;
+
+  sqlite3_bind_int64(stmt, 1, film_id);
+  sqlite3_bind_text(stmt, 2, file_path, -1, SQLITE_STATIC);
+  sqlite3_bind_text(stmt, 3, label, -1, SQLITE_STATIC);
+  sqlite3_bind_int(stmt, 4, sort_order);
+
+  rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+  return rc == SQLITE_DONE;
+}
+
+gboolean db_film_file_delete(ReelApp *app, gint64 film_file_id) {
+  const char *sql = "DELETE FROM film_files WHERE id=?";
+
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(app->db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK)
+    return FALSE;
+
+  sqlite3_bind_int64(stmt, 1, film_file_id);
+  rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+
+  return rc == SQLITE_DONE;
+}
+
+GList *db_film_files_get(ReelApp *app, gint64 film_id) {
+  const char *sql =
+      "SELECT id, film_id, file_path, label, sort_order FROM film_files "
+      "WHERE film_id = ? ORDER BY sort_order ASC, id ASC";
+
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(app->db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK)
+    return NULL;
+
+  sqlite3_bind_int64(stmt, 1, film_id);
+
+  GList *files = NULL;
+  while (sqlite3_step(stmt) == SQLITE_ROW) {
+    files = g_list_append(files, film_file_from_row(stmt));
+  }
+
+  sqlite3_finalize(stmt);
+  return files;
+}
+
+gboolean db_is_file_tracked(ReelApp *app, const gchar *file_path) {
+  const char *sql =
+      "SELECT 1 FROM films WHERE file_path = ? "
+      "UNION ALL "
+      "SELECT 1 FROM film_files WHERE file_path = ? "
+      "UNION ALL "
+      "SELECT 1 FROM episodes WHERE file_path = ? "
+      "LIMIT 1";
+
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(app->db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK)
+    return FALSE;
+
+  sqlite3_bind_text(stmt, 1, file_path, -1, SQLITE_STATIC);
+  sqlite3_bind_text(stmt, 2, file_path, -1, SQLITE_STATIC);
+  sqlite3_bind_text(stmt, 3, file_path, -1, SQLITE_STATIC);
+
+  gboolean exists = (sqlite3_step(stmt) == SQLITE_ROW);
+  sqlite3_finalize(stmt);
+  return exists;
 }
 
 Film *db_film_get_by_id(ReelApp *app, gint64 film_id) {
@@ -667,6 +809,143 @@ void db_person_free(DbPerson *person) {
     g_free(person->name);
     g_free(person);
   }
+}
+
+/* Episode operations */
+
+static Episode *episode_from_row(sqlite3_stmt *stmt) {
+  Episode *episode = episode_new();
+
+  episode->id = sqlite3_column_int64(stmt, 0);
+  episode->season_id = sqlite3_column_int64(stmt, 1);
+  episode->episode_number = sqlite3_column_int(stmt, 2);
+  episode->title = g_strdup((const gchar *)sqlite3_column_text(stmt, 3));
+  episode->file_path = g_strdup((const gchar *)sqlite3_column_text(stmt, 4));
+  episode->runtime_minutes = sqlite3_column_int(stmt, 5);
+  episode->plot = g_strdup((const gchar *)sqlite3_column_text(stmt, 6));
+  episode->tmdb_id = sqlite3_column_int(stmt, 7);
+  episode->air_date = g_strdup((const gchar *)sqlite3_column_text(stmt, 8));
+
+  return episode;
+}
+
+gboolean db_episode_insert(ReelApp *app, Episode *episode) {
+  const char *sql =
+      "INSERT INTO episodes (season_id, episode_number, title, file_path, "
+      "runtime_minutes, plot, tmdb_id, air_date) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(app->db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    g_printerr("Failed to prepare episode insert: %s\n",
+               sqlite3_errmsg(app->db));
+    return FALSE;
+  }
+
+  sqlite3_bind_int64(stmt, 1, episode->season_id);
+  sqlite3_bind_int(stmt, 2, episode->episode_number);
+  sqlite3_bind_text(stmt, 3, episode->title, -1, SQLITE_STATIC);
+  sqlite3_bind_text(stmt, 4, episode->file_path, -1, SQLITE_STATIC);
+  sqlite3_bind_int(stmt, 5, episode->runtime_minutes);
+  sqlite3_bind_text(stmt, 6, episode->plot, -1, SQLITE_STATIC);
+  sqlite3_bind_int(stmt, 7, episode->tmdb_id);
+  sqlite3_bind_text(stmt, 8, episode->air_date, -1, SQLITE_STATIC);
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    g_printerr("Failed to insert episode: %s\n", sqlite3_errmsg(app->db));
+    sqlite3_finalize(stmt);
+    return FALSE;
+  }
+
+  episode->id = sqlite3_last_insert_rowid(app->db);
+  sqlite3_finalize(stmt);
+  return TRUE;
+}
+
+gboolean db_episode_update(ReelApp *app, const Episode *episode) {
+  const char *sql =
+      "UPDATE episodes SET season_id=?, episode_number=?, title=?, "
+      "runtime_minutes=?, plot=?, tmdb_id=?, air_date=? "
+      "WHERE id=?";
+
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(app->db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK) {
+    g_printerr("Failed to prepare episode update: %s\n",
+               sqlite3_errmsg(app->db));
+    return FALSE;
+  }
+
+  sqlite3_bind_int64(stmt, 1, episode->season_id);
+  sqlite3_bind_int(stmt, 2, episode->episode_number);
+  sqlite3_bind_text(stmt, 3, episode->title, -1, SQLITE_STATIC);
+  sqlite3_bind_int(stmt, 4, episode->runtime_minutes);
+  sqlite3_bind_text(stmt, 5, episode->plot, -1, SQLITE_STATIC);
+  sqlite3_bind_int(stmt, 6, episode->tmdb_id);
+  sqlite3_bind_text(stmt, 7, episode->air_date, -1, SQLITE_STATIC);
+  sqlite3_bind_int64(stmt, 8, episode->id);
+
+  rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+
+  return rc == SQLITE_DONE;
+}
+
+GList *db_episodes_get_for_season(ReelApp *app, gint64 season_id) {
+  const char *sql =
+      "SELECT * FROM episodes WHERE season_id = ? ORDER BY episode_number";
+
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(app->db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK)
+    return NULL;
+
+  sqlite3_bind_int64(stmt, 1, season_id);
+
+  GList *list = NULL;
+  while (sqlite3_step(stmt) == SQLITE_ROW) {
+    list = g_list_append(list, episode_from_row(stmt));
+  }
+
+  sqlite3_finalize(stmt);
+  return list;
+}
+
+Episode *db_episode_get_by_path(ReelApp *app, const gchar *file_path) {
+  const char *sql = "SELECT * FROM episodes WHERE file_path = ?";
+
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(app->db, sql, -1, &stmt, NULL);
+  if (rc != SQLITE_OK)
+    return NULL;
+
+  sqlite3_bind_text(stmt, 1, file_path, -1, SQLITE_STATIC);
+
+  Episode *episode = NULL;
+  if (sqlite3_step(stmt) == SQLITE_ROW) {
+    episode = episode_from_row(stmt);
+  }
+
+  sqlite3_finalize(stmt);
+  return episode;
+}
+
+gint db_episodes_count_for_season(ReelApp *app, gint64 season_id) {
+  const char *sql = "SELECT COUNT(*) FROM episodes WHERE season_id = ?";
+  sqlite3_stmt *stmt;
+  int count = 0;
+
+  if (sqlite3_prepare_v2(app->db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+    sqlite3_bind_int64(stmt, 1, season_id);
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+      count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+  }
+
+  return count;
 }
 
 void db_cast_member_free(DbCastMember *member) {

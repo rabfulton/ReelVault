@@ -39,10 +39,26 @@ typedef enum {
   MATCH_STATUS_IGNORED = 3
 } MatchStatus;
 
-/* Film structure */
+/* Media type enum */
+typedef enum { MEDIA_FILM = 0, MEDIA_TV_SEASON = 1 } MediaType;
+
+/* Episode structure (for TV seasons) */
+typedef struct _Episode {
+  gint64 id;
+  gint64 season_id; /* References Film.id where media_type=TV_SEASON */
+  gint episode_number;
+  gchar *title;
+  gchar *file_path;
+  gint runtime_minutes;
+  gchar *plot;
+  gint tmdb_id;
+  gchar *air_date;
+} Episode;
+
+/* Film structure (also used for TV seasons) */
 struct _Film {
   gint64 id;
-  gchar *file_path;
+  gchar *file_path; /* For films: video file; for TV: season folder path */
   gchar *title;
   gint year;
   gint runtime_minutes;
@@ -53,6 +69,8 @@ struct _Film {
   gdouble rating;
   gint64 added_date;
   MatchStatus match_status;
+  MediaType media_type;
+  gint season_number; /* For TV seasons only */
 
   /* Cached data */
   GdkPixbuf *poster_pixbuf;
@@ -114,6 +132,10 @@ gboolean reel_app_init_paths(ReelApp *app);
 Film *film_new(void);
 void film_free(Film *film);
 Film *film_copy(const Film *film);
+
+/* Episode memory management */
+Episode *episode_new(void);
+void episode_free(Episode *episode);
 
 /* Filter state */
 void filter_state_init(FilterState *filter);
