@@ -1,6 +1,7 @@
 # ReelVault
 
-A native GTK3 application for browsing and launching your local film collection.
+A native GTK3 application for browsing and launching your local film collection. Requires a TMDB API key to fetch film details.
+
 ![ReelVault screenshot](screenshots/screenshot.png)
 
 ## Features
@@ -12,52 +13,72 @@ A native GTK3 application for browsing and launching your local film collection.
 - **External Player:** Launch films in your preferred video player
 - **Manual Matching:** Fix incorrect matches or identify unrecognized films
 
-## Dependencies
+## Installation
 
-- GTK 3.0
-- SQLite 3
-- libcurl
-- json-c
+### Arch Linux (AUR)
 
-### Arch Linux
+- Package: https://aur.archlinux.org/packages/reelvault
+
+Using an AUR helper:
 ```bash
-sudo pacman -S gtk3 sqlite curl json-c
+yay -S reelvault
 ```
 
-### Debian/Ubuntu
+### Debian/Ubuntu (.deb)
+
+Download the `.deb` from GitHub Releases, then install it:
 ```bash
-sudo apt install libgtk-3-dev libsqlite3-dev libcurl4-openssl-dev libjson-c-dev
+sudo apt install ./reelvault_*.deb
 ```
 
-## Building
+### Fedora/RHEL (.rpm)
 
+Download the `.rpm` from GitHub Releases, then install it:
 ```bash
-make
+sudo dnf install ./reelvault-*.rpm
 ```
 
 ## Running
 
 ```bash
-./reelvault
+reelvault
 ```
 
 On first run, you'll be prompted to:
 1. Enter your TMDB API key (get one free at https://www.themoviedb.org/settings/api)
 2. Add your film library directories
 
-## Configuration
+The config file is stored here: `~/.config/reelvault/config.ini`
 
-Config file: `~/.config/reelvault/config.ini`
+## Building From Source
 
-```ini
-[tmdb]
-api_key=your_api_key_here
+### Dependencies
 
-[player]
-command=mpv
+- GTK 3.0
+- SQLite 3
+- libcurl
+- json-c
 
-[library]
-paths=/home/user/Movies;/media/external/Films
+#### Arch Linux
+```bash
+sudo pacman -S base-devel gtk3 sqlite curl json-c
+```
+
+#### Debian/Ubuntu
+```bash
+sudo apt install build-essential pkg-config libgtk-3-dev libsqlite3-dev libcurl4-openssl-dev libjson-c-dev
+```
+
+### Build
+
+```bash
+make
+```
+
+### Run
+
+```bash
+./reelvault
 ```
 
 ## License

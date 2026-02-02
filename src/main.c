@@ -57,6 +57,8 @@ static void on_shutdown(GtkApplication *gtk_app, gpointer user_data) {
 
 int main(int argc, char *argv[]) {
   setlocale(LC_ALL, "");
+  g_set_prgname("reelvault");
+  g_set_application_name(APP_NAME);
 
   /* Create application state */
   ReelApp *app = reel_app_new();
