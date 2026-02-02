@@ -264,6 +264,67 @@ static void on_unmatched_clicked(GtkButton *button, gpointer user_data) {
   window_show_unmatched(app);
 }
 
+typedef struct {
+  ReelApp *app;
+  GtkWidget *dialog;
+  GtkWidget *label;
+  GtkWidget *progress;
+  gboolean canceled;
+} ImportProgressUi;
+
+static void import_progress_destroy(ImportProgressUi *ui) {
+  if (!ui)
+    return;
+  if (ui->dialog)
+    gtk_widget_destroy(ui->dialog);
+  g_free(ui);
+}
+
+static void on_import_dialog_response(GtkDialog *dialog, gint response_id,
+                                      gpointer user_data) {
+  (void)dialog;
+  ImportProgressUi *ui = (ImportProgressUi *)user_data;
+  if (response_id == GTK_RESPONSE_CANCEL) {
+    ui->canceled = TRUE;
+    scraper_stop(ui->app);
+  }
+}
+
+static void scraper_progress_cb(ReelApp *app, gint done, gint total,
+                                const gchar *current_title,
+                                gpointer user_data) {
+  (void)app;
+  ImportProgressUi *ui = (ImportProgressUi *)user_data;
+  if (!ui || ui->canceled)
+    return;
+
+  if (total <= 0)
+    total = 1;
+
+  gchar *text = g_strdup_printf("Fetching metadata (%d/%d): %s", done, total,
+                                current_title ? current_title : "");
+  gtk_label_set_text(GTK_LABEL(ui->label), text);
+  g_free(text);
+
+  gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ui->progress),
+                                (gdouble)done / (gdouble)total);
+}
+
+static void scraper_done_cb(ReelApp *app, gboolean canceled,
+                            gpointer user_data) {
+  ImportProgressUi *ui = (ImportProgressUi *)user_data;
+  if (!ui)
+    return;
+
+  window_refresh_films(app);
+
+  gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ui->progress), 1.0);
+  gtk_label_set_text(GTK_LABEL(ui->label),
+                     canceled ? "Import canceled." : "Import complete.");
+
+  import_progress_destroy(ui);
+}
+
 /* Callback for add folder button in settings */
 static void on_add_folder_clicked(GtkButton *btn, gpointer user_data) {
   GtkWidget *settings_dialog = GTK_WIDGET(user_data);
@@ -290,6 +351,29 @@ static void on_add_folder_clicked(GtkButton *btn, gpointer user_data) {
 
   gtk_widget_destroy(chooser);
   (void)btn;
+}
+
+static void on_remove_folder_clicked(GtkButton *btn, gpointer user_data) {
+  (void)btn;
+  GtkWidget *settings_dialog = GTK_WIDGET(user_data);
+  ReelApp *app = g_object_get_data(G_OBJECT(settings_dialog), "app");
+  GtkWidget *lib_list =
+      g_object_get_data(G_OBJECT(settings_dialog), "lib_list");
+
+  GtkListBoxRow *row = gtk_list_box_get_selected_row(GTK_LIST_BOX(lib_list));
+  if (!row)
+    return;
+
+  GtkWidget *child = gtk_bin_get_child(GTK_BIN(row));
+  if (!GTK_IS_LABEL(child))
+    return;
+
+  const gchar *path = gtk_label_get_text(GTK_LABEL(child));
+  if (path && strlen(path) > 0) {
+    config_remove_library_path(app, path);
+  }
+
+  gtk_widget_destroy(GTK_WIDGET(row));
 }
 
 void window_show_settings(ReelApp *app) {
@@ -346,6 +430,8 @@ void window_show_settings(ReelApp *app) {
   gtk_box_pack_start(GTK_BOX(lib_box), lib_scroll, TRUE, TRUE, 0);
 
   GtkWidget *lib_list = gtk_list_box_new();
+  gtk_list_box_set_selection_mode(GTK_LIST_BOX(lib_list),
+                                  GTK_SELECTION_SINGLE);
   gtk_container_add(GTK_CONTAINER(lib_scroll), lib_list);
 
   /* Populate library paths */
@@ -362,6 +448,9 @@ void window_show_settings(ReelApp *app) {
   GtkWidget *add_btn = gtk_button_new_with_label("Add Folder...");
   gtk_box_pack_start(GTK_BOX(btn_box), add_btn, FALSE, FALSE, 0);
 
+  GtkWidget *remove_btn = gtk_button_new_with_label("Remove Selected");
+  gtk_box_pack_start(GTK_BOX(btn_box), remove_btn, FALSE, FALSE, 0);
+
   /* Store references for callback */
   g_object_set_data(G_OBJECT(dialog), "api_entry", api_entry);
   g_object_set_data(G_OBJECT(dialog), "player_entry", player_entry);
@@ -370,6 +459,8 @@ void window_show_settings(ReelApp *app) {
 
   /* Add folder callback */
   g_signal_connect(add_btn, "clicked", G_CALLBACK(on_add_folder_clicked),
+                   dialog);
+  g_signal_connect(remove_btn, "clicked", G_CALLBACK(on_remove_folder_clicked),
                    dialog);
 
   gtk_widget_show_all(dialog);
@@ -396,44 +487,74 @@ void window_show_settings(ReelApp *app) {
 }
 
 void window_scan_library(ReelApp *app) {
-  /* Show progress dialog */
-  GtkWidget *dialog = gtk_message_dialog_new(
-      GTK_WINDOW(app->window), GTK_DIALOG_MODAL, GTK_MESSAGE_INFO,
-      GTK_BUTTONS_NONE, "Scanning library...");
-  window_apply_theme(app, dialog);
-  gtk_widget_show(dialog);
+  ImportProgressUi *ui = g_new0(ImportProgressUi, 1);
+  ui->app = app;
 
-  /* Process events to show dialog */
-  while (gtk_events_pending()) {
+  ui->dialog = gtk_dialog_new_with_buttons(
+      "Import Library", GTK_WINDOW(app->window),
+      GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, "_Cancel",
+      GTK_RESPONSE_CANCEL, NULL);
+  window_apply_theme(app, ui->dialog);
+  gtk_window_set_default_size(GTK_WINDOW(ui->dialog), 520, 160);
+
+  GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(ui->dialog));
+  gtk_container_set_border_width(GTK_CONTAINER(content), 12);
+  gtk_box_set_spacing(GTK_BOX(content), 10);
+
+  ui->label = gtk_label_new("Scanning library...");
+  gtk_label_set_xalign(GTK_LABEL(ui->label), 0);
+  gtk_box_pack_start(GTK_BOX(content), ui->label, FALSE, FALSE, 0);
+
+  ui->progress = gtk_progress_bar_new();
+  gtk_progress_bar_pulse(GTK_PROGRESS_BAR(ui->progress));
+  gtk_box_pack_start(GTK_BOX(content), ui->progress, FALSE, FALSE, 0);
+
+  g_signal_connect(ui->dialog, "response", G_CALLBACK(on_import_dialog_response),
+                   ui);
+
+  gtk_widget_show_all(ui->dialog);
+
+  while (gtk_events_pending())
     gtk_main_iteration();
-  }
 
-  /* Scan directories */
+  /* Scan directories (synchronous) with a pulsing progress bar. */
   int new_films = 0;
   for (int i = 0; i < app->library_paths_count; i++) {
+    if (ui->canceled)
+      break;
+
+    gchar *text = g_strdup_printf("Scanning: %s", app->library_paths[i]);
+    gtk_label_set_text(GTK_LABEL(ui->label), text);
+    g_free(text);
+
+    gtk_progress_bar_pulse(GTK_PROGRESS_BAR(ui->progress));
+    while (gtk_events_pending())
+      gtk_main_iteration();
+
     new_films += scanner_scan_directory(app, app->library_paths[i]);
   }
 
-  gtk_widget_destroy(dialog);
-
-  /* Show result */
-  GtkWidget *result = gtk_message_dialog_new(
-      GTK_WINDOW(app->window), GTK_DIALOG_MODAL, GTK_MESSAGE_INFO,
-      GTK_BUTTONS_OK,
-      "Scan complete.\nFound %d new films.\n\nUse the unmatched button to "
-      "review films that need matching.",
-      new_films);
-  window_apply_theme(app, result);
-  gtk_dialog_run(GTK_DIALOG(result));
-  gtk_widget_destroy(result);
-
-  /* Refresh display */
   window_refresh_films(app);
 
-  /* Start scraping in background if we have an API key */
-  if (app->tmdb_api_key && strlen(app->tmdb_api_key) > 0 && new_films > 0) {
-    scraper_start_background(app);
+  if (ui->canceled) {
+    gtk_label_set_text(GTK_LABEL(ui->label), "Import canceled.");
+    import_progress_destroy(ui);
+    return;
   }
+
+  /* Start scraping in background if we have an API key. */
+  if (app->tmdb_api_key && strlen(app->tmdb_api_key) > 0 && new_films > 0) {
+    gtk_label_set_text(GTK_LABEL(ui->label), "Fetching metadata from TMDB...");
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ui->progress), 0.0);
+    scraper_start_background_with_progress(app, scraper_progress_cb,
+                                          scraper_done_cb, ui);
+    return;
+  }
+
+  /* No scraping step; we're done. */
+  gtk_label_set_text(GTK_LABEL(ui->label), "Import complete.");
+  gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ui->progress), 1.0);
+  import_progress_destroy(ui);
 }
 
 /* Callback for match button in unmatched list */

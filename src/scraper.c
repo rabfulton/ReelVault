@@ -622,13 +622,56 @@ void tmdb_search_result_free(TmdbSearchResult *result) {
 typedef struct {
   ReelApp *app;
   gboolean running;
+  ScraperProgressFunc progress_cb;
+  ScraperDoneFunc done_cb;
+  gpointer user_data;
+  gint total;
+  gint done;
+  gint pending_callbacks;
 } ScraperContext;
+
+static ScraperContext *active_scraper = NULL;
+
+typedef struct {
+  ScraperContext *ctx;
+  gchar *title;
+} ScraperProgressPayload;
+
+static gboolean scraper_progress_idle(gpointer data) {
+  ScraperProgressPayload *p = (ScraperProgressPayload *)data;
+  if (p->ctx->progress_cb) {
+    p->ctx->progress_cb(p->ctx->app, p->ctx->done, p->ctx->total, p->title,
+                        p->ctx->user_data);
+  }
+  p->ctx->pending_callbacks--;
+  g_free(p->title);
+  g_free(p);
+  return G_SOURCE_REMOVE;
+}
+
+static gboolean scraper_done_idle(gpointer data) {
+  ScraperContext *ctx = (ScraperContext *)data;
+  if (ctx->pending_callbacks > 0) {
+    return G_SOURCE_CONTINUE;
+  }
+  gboolean canceled = !ctx->running;
+  if (ctx->done_cb) {
+    ctx->done_cb(ctx->app, canceled, ctx->user_data);
+  }
+  /* Mark scraper as inactive once UI is notified. */
+  if (active_scraper == ctx)
+    active_scraper = NULL;
+  g_free(ctx);
+  return G_SOURCE_REMOVE;
+}
 
 static gpointer scraper_thread_func(gpointer data) {
   ScraperContext *ctx = (ScraperContext *)data;
   ReelApp *app = ctx->app;
 
   GList *unmatched = db_films_get_unmatched(app);
+  ctx->total = g_list_length(unmatched);
+  ctx->done = 0;
 
   for (GList *l = unmatched; l != NULL && ctx->running; l = l->next) {
     Film *film = (Film *)l->data;
@@ -671,17 +714,24 @@ static gpointer scraper_thread_func(gpointer data) {
       g_list_free_full(results, (GDestroyNotify)tmdb_search_result_free);
     }
 
+    ctx->done++;
+    if (ctx->progress_cb) {
+      ctx->pending_callbacks++;
+      ScraperProgressPayload *p = g_new0(ScraperProgressPayload, 1);
+      p->ctx = ctx;
+      p->title = g_strdup(film->title ? film->title : "");
+      g_idle_add(scraper_progress_idle, p);
+    }
+
     /* Rate limiting */
     g_usleep(250000); /* 250ms between requests */
   }
 
   g_list_free_full(unmatched, (GDestroyNotify)film_free);
-  g_free(ctx);
+  g_idle_add(scraper_done_idle, ctx);
 
   return NULL;
 }
-
-static ScraperContext *active_scraper = NULL;
 
 void scraper_start_background(ReelApp *app) {
   if (active_scraper && active_scraper->running) {
@@ -692,6 +742,26 @@ void scraper_start_background(ReelApp *app) {
   ScraperContext *ctx = g_new0(ScraperContext, 1);
   ctx->app = app;
   ctx->running = TRUE;
+  active_scraper = ctx;
+
+  g_thread_new("scraper", scraper_thread_func, ctx);
+}
+
+void scraper_start_background_with_progress(ReelApp *app,
+                                            ScraperProgressFunc progress_cb,
+                                            ScraperDoneFunc done_cb,
+                                            gpointer user_data) {
+  if (active_scraper && active_scraper->running) {
+    g_print("Scraper already running\n");
+    return;
+  }
+
+  ScraperContext *ctx = g_new0(ScraperContext, 1);
+  ctx->app = app;
+  ctx->running = TRUE;
+  ctx->progress_cb = progress_cb;
+  ctx->done_cb = done_cb;
+  ctx->user_data = user_data;
   active_scraper = ctx;
 
   g_thread_new("scraper", scraper_thread_func, ctx);

@@ -19,6 +19,18 @@ void scraper_start_background(ReelApp *app);
 /* Stop background scraping */
 void scraper_stop(ReelApp *app);
 
+typedef void (*ScraperProgressFunc)(ReelApp *app, gint done, gint total,
+                                    const gchar *current_title,
+                                    gpointer user_data);
+typedef void (*ScraperDoneFunc)(ReelApp *app, gboolean canceled,
+                                gpointer user_data);
+
+/* Start background scraping of unmatched films with progress callbacks */
+void scraper_start_background_with_progress(ReelApp *app,
+                                            ScraperProgressFunc progress_cb,
+                                            ScraperDoneFunc done_cb,
+                                            gpointer user_data);
+
 /* Search TMDB for a film (synchronous) */
 GList *scraper_search_tmdb(ReelApp *app, const gchar *query, gint year);
 
