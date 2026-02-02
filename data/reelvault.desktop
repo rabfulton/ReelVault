@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=ReelVault
+Comment=Browse and launch your local film collection
+Exec=reelvault
+Icon=reelvault
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;

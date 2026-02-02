@@ -54,7 +54,7 @@ static char *http_get(const char *url) {
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-  curl_easy_setopt(curl, CURLOPT_USERAGENT, "ReelGTK/1.0");
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, "ReelVault/1.0");
 
   CURLcode res = curl_easy_perform(curl);
   curl_easy_cleanup(curl);
@@ -82,7 +82,7 @@ static gboolean download_file(const char *url, const char *dest_path) {
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
-  curl_easy_setopt(curl, CURLOPT_USERAGENT, "ReelGTK/1.0");
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, "ReelVault/1.0");
 
   CURLcode res = curl_easy_perform(curl);
 

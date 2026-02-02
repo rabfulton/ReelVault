@@ -1,6 +1,7 @@
-# ReelGTK
+# ReelVault
 
 A native GTK3 application for browsing and launching your local film collection.
+![ReelVault screenshot](screenshots/screenshot.png)
 
 ## Features
 
@@ -37,7 +38,7 @@ make
 ## Running
 
 ```bash
-./reelgtk
+./reelvault
 ```
 
 On first run, you'll be prompted to:
@@ -46,7 +47,7 @@ On first run, you'll be prompted to:
 
 ## Configuration
 
-Config file: `~/.config/reelgtk/config.ini`
+Config file: `~/.config/reelvault/config.ini`
 
 ```ini
 [tmdb]
@@ -62,3 +63,10 @@ paths=/home/user/Movies;/media/external/Films
 ## License
 
 MIT
+
+## Other Useful Projects
+
+- A lightweight speech to text implementation [Auriscribe](https://github.com/rabfulton/Auriscribe)
+- A full featured AI application [ChatGTK](https://github.com/rabfulton/ChatGTK)
+- A Markdown notes application for your system tray [TrayMD](https://github.com/rabfulton/TrayMD)
+- Try my AI panel plugin for XFCE [XFCE Ask](https://github.com/rabfulton/xfce-ask)

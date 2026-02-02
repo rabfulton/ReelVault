@@ -1,4 +1,4 @@
-# ReelGTK - Film Collection Browser
+# ReelVault - Film Collection Browser
 # Makefile for building the application
 
 CC = gcc
@@ -8,7 +8,7 @@ LDFLAGS = $(shell pkg-config --libs $(PKGS)) -lpthread
 
 SRC_DIR = src
 BUILD_DIR = build
-TARGET = reelgtk
+TARGET = reelvault
 
 SOURCES = $(wildcard $(SRC_DIR)/*.c)
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
@@ -31,13 +31,13 @@ clean:
 
 install: $(TARGET)
 	install -Dm755 $(TARGET) $(DESTDIR)/usr/bin/$(TARGET)
-	install -Dm644 data/reelgtk.desktop $(DESTDIR)/usr/share/applications/reelgtk.desktop
-	install -Dm644 data/icons/reelgtk.svg $(DESTDIR)/usr/share/icons/hicolor/scalable/apps/reelgtk.svg
+	install -Dm644 data/reelvault.desktop $(DESTDIR)/usr/share/applications/reelvault.desktop
+	install -Dm644 data/icons/reelvault.svg $(DESTDIR)/usr/share/icons/hicolor/scalable/apps/reelvault.svg
 
 uninstall:
 	rm -f $(DESTDIR)/usr/bin/$(TARGET)
-	rm -f $(DESTDIR)/usr/share/applications/reelgtk.desktop
-	rm -f $(DESTDIR)/usr/share/icons/hicolor/scalable/apps/reelgtk.svg
+	rm -f $(DESTDIR)/usr/share/applications/reelvault.desktop
+	rm -f $(DESTDIR)/usr/share/icons/hicolor/scalable/apps/reelvault.svg
 
 test:
 	@echo "Tests not yet implemented"

@@ -5,10 +5,10 @@
 #include <sqlite3.h>
 
 /* Application name and paths */
-#define APP_NAME "ReelGTK"
-#define APP_ID "com.github.reelgtk"
-#define CONFIG_DIR_NAME "reelgtk"
-#define CACHE_DIR_NAME "reelgtk"
+#define APP_NAME "ReelVault"
+#define APP_ID "com.github.reelvault"
+#define CONFIG_DIR_NAME "reelvault"
+#define CACHE_DIR_NAME "reelvault"
 #define DB_FILENAME "library.db"
 #define CONFIG_FILENAME "config.ini"
 

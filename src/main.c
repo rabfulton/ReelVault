@@ -123,23 +123,73 @@ gboolean reel_app_init_paths(ReelApp *app) {
   const gchar *config_home = g_get_user_config_dir();
   const gchar *cache_home = g_get_user_cache_dir();
 
-  /* Config directory */
+  /* Config directory (with backward-compat fallback for previous app name) */
   gchar *config_dir = g_build_filename(config_home, CONFIG_DIR_NAME, NULL);
-  if (g_mkdir_with_parents(config_dir, 0755) != 0) {
-    g_printerr("Failed to create config directory: %s\n", config_dir);
-    g_free(config_dir);
-    return FALSE;
+  gchar *old_config_dir = g_build_filename(config_home, "reelgtk", NULL);
+
+  gchar *candidate_config = g_build_filename(config_dir, CONFIG_FILENAME, NULL);
+  gchar *candidate_db = g_build_filename(config_dir, DB_FILENAME, NULL);
+  gchar *old_config = g_build_filename(old_config_dir, CONFIG_FILENAME, NULL);
+  gchar *old_db = g_build_filename(old_config_dir, DB_FILENAME, NULL);
+
+  gboolean have_new = g_file_test(candidate_db, G_FILE_TEST_EXISTS) ||
+                      g_file_test(candidate_config, G_FILE_TEST_EXISTS);
+  gboolean have_old =
+      g_file_test(old_db, G_FILE_TEST_EXISTS) ||
+      g_file_test(old_config, G_FILE_TEST_EXISTS);
+
+  const gchar *use_dir = config_dir;
+  if (!have_new && have_old) {
+    use_dir = old_config_dir;
+  } else {
+    if (g_mkdir_with_parents(config_dir, 0755) != 0) {
+      g_printerr("Failed to create config directory: %s\n", config_dir);
+      g_free(config_dir);
+      g_free(old_config_dir);
+      g_free(candidate_config);
+      g_free(candidate_db);
+      g_free(old_config);
+      g_free(old_db);
+      return FALSE;
+    }
   }
-  app->config_path = g_build_filename(config_dir, CONFIG_FILENAME, NULL);
-  app->db_path = g_build_filename(config_dir, DB_FILENAME, NULL);
+
+  app->config_path = g_build_filename(use_dir, CONFIG_FILENAME, NULL);
+  app->db_path = g_build_filename(use_dir, DB_FILENAME, NULL);
+
+  g_free(candidate_config);
+  g_free(candidate_db);
+  g_free(old_config);
+  g_free(old_db);
   g_free(config_dir);
+  g_free(old_config_dir);
 
   /* Cache directory */
-  app->cache_path = g_build_filename(cache_home, CACHE_DIR_NAME, NULL);
+  gchar *cache_dir = g_build_filename(cache_home, CACHE_DIR_NAME, NULL);
+  gchar *old_cache_dir = g_build_filename(cache_home, "reelgtk", NULL);
+
+  const gchar *use_cache_dir = cache_dir;
+  if (!g_file_test(cache_dir, G_FILE_TEST_IS_DIR) &&
+      g_file_test(old_cache_dir, G_FILE_TEST_IS_DIR)) {
+    use_cache_dir = old_cache_dir;
+  } else {
+    if (g_mkdir_with_parents(cache_dir, 0755) != 0) {
+      g_printerr("Failed to create cache directory: %s\n", cache_dir);
+      g_free(cache_dir);
+      g_free(old_cache_dir);
+      return FALSE;
+    }
+  }
+
+  app->cache_path = g_strdup(use_cache_dir);
   if (g_mkdir_with_parents(app->cache_path, 0755) != 0) {
     g_printerr("Failed to create cache directory: %s\n", app->cache_path);
+    g_free(cache_dir);
+    g_free(old_cache_dir);
     return FALSE;
   }
+  g_free(cache_dir);
+  g_free(old_cache_dir);
 
   /* Poster cache directory */
   app->poster_cache_path = g_build_filename(app->cache_path, "posters", NULL);
