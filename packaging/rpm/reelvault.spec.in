@@ -1,0 +1,44 @@
+Name:           reelvault
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        Browse and launch your local film collection
+
+License:        MIT
+URL:            @URL@
+Source0:        %{name}-%{version}.tar.gz
+
+BuildRequires:  gcc
+BuildRequires:  make
+BuildRequires:  pkgconfig
+BuildRequires:  gtk3-devel
+BuildRequires:  sqlite-devel
+BuildRequires:  libcurl-devel
+BuildRequires:  json-c-devel
+
+Requires:       gtk3
+Requires:       sqlite
+Requires:       libcurl
+Requires:       json-c
+
+%global debug_package %{nil}
+
+%description
+ReelVault is a native GTK3 application for browsing and launching a local film collection.
+
+%prep
+%autosetup
+
+%build
+%make_build
+
+%install
+rm -rf %{buildroot}
+make DESTDIR=%{buildroot} install
+
+%files
+%defattr(-,root,root,-)
+/usr/bin/reelvault
+/usr/share/applications/reelvault.desktop
+/usr/share/icons/hicolor/scalable/apps/reelvault.svg
+
+%changelog

@@ -1,0 +1,8 @@
+Package: reelvault
+Version: @VERSION@
+Section: video
+Priority: optional
+Architecture: @ARCH@
+Maintainer: @MAINTAINER@
+Depends: libgtk-3-0, libsqlite3-0, libcurl4, libjson-c5 | libjson-c4
+Description: Browse and launch your local film collection
