@@ -14,7 +14,6 @@
 
 /* Forward declarations */
 static void apply_theme_css(ReelApp *app);
-static void on_theme_toggle_clicked(GtkButton *button, gpointer user_data);
 static void on_scan_clicked(GtkButton *button, gpointer user_data);
 static void on_settings_clicked(GtkButton *button, gpointer user_data);
 static void on_unmatched_clicked(GtkButton *button, gpointer user_data);
@@ -23,26 +22,26 @@ void window_apply_theme(ReelApp *app, GtkWidget *toplevel) {
   if (!toplevel)
     return;
 
-  GtkStyleContext *ctx = gtk_widget_get_style_context(toplevel);
-  gtk_style_context_remove_class(ctx, "dark-theme");
-  gtk_style_context_remove_class(ctx, "light-theme");
-
+  gboolean prefer_dark = app->system_prefer_dark;
   if (app->theme_preference == THEME_DARK) {
-    gtk_style_context_add_class(ctx, "dark-theme");
+    prefer_dark = TRUE;
   } else if (app->theme_preference == THEME_LIGHT) {
-    gtk_style_context_add_class(ctx, "light-theme");
-  }
-
-  gboolean prefer_dark = (app->theme_preference == THEME_DARK);
-  /* For THEME_SYSTEM, avoid forcing a dark variant. */
-  if (app->theme_preference == THEME_SYSTEM)
     prefer_dark = FALSE;
+  }
 
   g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme",
                prefer_dark, NULL);
+
+  gtk_widget_queue_draw(toplevel);
 }
 
 void window_create(ReelApp *app) {
+  if (app->system_prefer_dark == FALSE) {
+    g_object_get(gtk_settings_get_default(),
+                 "gtk-application-prefer-dark-theme", &app->system_prefer_dark,
+                 NULL);
+  }
+
   /* Get DPI scale factor from GDK */
   GdkScreen *screen = gdk_screen_get_default();
   if (screen) {
@@ -89,13 +88,6 @@ void window_create(ReelApp *app) {
   gtk_header_bar_pack_start(GTK_HEADER_BAR(header), unmatched_btn);
 
   /* Header bar buttons - right side */
-  GtkWidget *theme_btn = gtk_button_new_from_icon_name(
-      "weather-clear-night-symbolic", GTK_ICON_SIZE_BUTTON);
-  gtk_widget_set_tooltip_text(theme_btn, "Toggle Dark/Light Theme");
-  g_signal_connect(theme_btn, "clicked", G_CALLBACK(on_theme_toggle_clicked),
-                   app);
-  gtk_header_bar_pack_end(GTK_HEADER_BAR(header), theme_btn);
-
   GtkWidget *settings_btn = gtk_button_new_from_icon_name(
       "emblem-system-symbolic", GTK_ICON_SIZE_BUTTON);
   gtk_widget_set_tooltip_text(settings_btn, "Settings");
@@ -118,12 +110,12 @@ void window_create(ReelApp *app) {
   gtk_container_add(GTK_CONTAINER(scrolled), app->grid_view);
 
   /* Status bar */
-  app->status_bar = gtk_statusbar_new();
-  gtk_box_pack_end(GTK_BOX(main_box), app->status_bar, FALSE, FALSE, 0);
+  app->status_bar = NULL;
 
   /* Initial load */
   window_refresh_films(app);
   window_update_status_bar(app);
+  filter_bar_refresh(app);
 
   /* Apply theme CSS */
   apply_theme_css(app);
@@ -143,8 +135,8 @@ static void apply_theme_css(ReelApp *app) {
 
       /* Poster grid items - tight spacing */
       "flowbox > flowboxchild {"
-      "    margin: 2px;"
-      "    padding: 4px;"
+      "    margin: 1px;"
+      "    padding: 3px;"
       "    border-radius: 6px;"
       "    transition: all 200ms ease;"
       "}"
@@ -196,72 +188,7 @@ static void apply_theme_css(ReelApp *app) {
       ".filter-bar entry {"
       "    min-width: 200px;"
       "}"
-
-      /* ===== DARK THEME SPECIFIC ===== */
-      ".dark-theme {"
-      "    background-color: #1e1e2e;"
-      "    color: #cdd6f4;"
-      "}"
-      ".dark-theme headerbar {"
-      "    background-color: #313244;"
-      "    color: #cdd6f4;"
-      "}"
-      ".dark-theme .poster-title {"
-      "    color: #cdd6f4;"
-      "}"
-      ".dark-theme .poster-year {"
-      "    color: #a6adc8;"
-      "}"
-      ".dark-theme flowbox > flowboxchild:hover {"
-      "    background-color: alpha(#89b4fa, 0.15);"
-      "}"
-      ".dark-theme flowbox > flowboxchild:selected {"
-      "    background-color: alpha(#89b4fa, 0.25);"
-      "}"
-      ".dark-theme statusbar {"
-      "    background-color: #313244;"
-      "    color: #bac2de;"
-      "}"
-
-      /* ===== LIGHT THEME SPECIFIC ===== */
-      ".light-theme {"
-      "    background-color: #eff1f5;"
-      "    color: #4c4f69;"
-      "}"
-      ".light-theme headerbar {"
-      "    background-color: #dce0e8;"
-      "    color: #4c4f69;"
-      "}"
-      ".light-theme .poster-title {"
-      "    color: #4c4f69;"
-      "}"
-      ".light-theme .poster-year {"
-      "    color: #6c6f85;"
-      "}"
-      ".light-theme flowbox > flowboxchild:hover {"
-      "    background-color: alpha(#1e66f5, 0.12);"
-      "}"
-      ".light-theme flowbox > flowboxchild:selected {"
-      "    background-color: alpha(#1e66f5, 0.2);"
-      "}"
-      ".light-theme statusbar {"
-      "    background-color: #dce0e8;"
-      "    color: #5c5f77;"
-      "}"
-
-      /* Ensure common widgets look coherent when we force a light/dark class. */
-      ".dark-theme button,"
-      ".dark-theme combobox,"
-      ".dark-theme entry,"
-      ".dark-theme spinbutton {"
-      "    color: #cdd6f4;"
-      "}"
-      ".light-theme button,"
-      ".light-theme combobox,"
-      ".light-theme entry,"
-      ".light-theme spinbutton {"
-      "    color: #4c4f69;"
-      "}",
+      ,
       base_font, small_font, badge_font, small_font);
 
   gtk_css_provider_load_from_data(css, css_str, -1, NULL);
@@ -274,24 +201,6 @@ static void apply_theme_css(ReelApp *app) {
 
   /* Apply initial theme based on preference */
   window_apply_theme(app, app->window);
-}
-
-/* Theme toggle callback */
-static void on_theme_toggle_clicked(GtkButton *button, gpointer user_data) {
-  (void)button;
-  ReelApp *app = (ReelApp *)user_data;
-
-  /* Cycle through: System -> Dark -> Light -> System */
-  if (app->theme_preference == THEME_SYSTEM) {
-    app->theme_preference = THEME_DARK;
-  } else if (app->theme_preference == THEME_DARK) {
-    app->theme_preference = THEME_LIGHT;
-  } else {
-    app->theme_preference = THEME_SYSTEM;
-  }
-
-  window_apply_theme(app, app->window);
-  config_save(app);
 }
 
 void window_refresh_films(ReelApp *app) {
@@ -312,9 +221,12 @@ void window_refresh_films(ReelApp *app) {
   app->unmatched_films = db_films_count_unmatched(app);
 
   window_update_status_bar(app);
+  filter_bar_refresh(app);
 }
 
 void window_update_status_bar(ReelApp *app) {
+  if (!app->status_bar)
+    return;
   gchar *status = g_strdup_printf("%d films | %d unmatched", app->total_films,
                                   app->unmatched_films);
   gtk_statusbar_pop(GTK_STATUSBAR(app->status_bar), 0);

@@ -35,10 +35,15 @@ static GtkWidget *create_poster_widget(ReelApp *app, Film *film) {
 
   /* Outer box - tight spacing */
   GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-  gtk_widget_set_size_request(box, poster_width, -1);
+  gtk_widget_set_halign(box, GTK_ALIGN_CENTER);
+  gtk_widget_set_valign(box, GTK_ALIGN_START);
+  gint extra_height =
+      (gint)(52 * ((app->scale_factor > 0) ? app->scale_factor : 1.0));
+  gtk_widget_set_size_request(box, poster_width, poster_height + extra_height);
 
   /* Overlay for poster + badge */
   GtkWidget *overlay = gtk_overlay_new();
+  gtk_widget_set_halign(overlay, GTK_ALIGN_CENTER);
   gtk_box_pack_start(GTK_BOX(box), overlay, FALSE, FALSE, 0);
 
   /* Poster image */
@@ -68,6 +73,8 @@ static GtkWidget *create_poster_widget(ReelApp *app, Film *film) {
   }
 
   gtk_widget_set_size_request(image, poster_width, poster_height);
+  gtk_widget_set_halign(image, GTK_ALIGN_CENTER);
+  gtk_widget_set_valign(image, GTK_ALIGN_START);
   gtk_container_add(GTK_CONTAINER(overlay), image);
 
   /* Unmatched badge */
@@ -88,6 +95,7 @@ static GtkWidget *create_poster_widget(ReelApp *app, Film *film) {
   gchar *display_title =
       film->title ? film->title : g_path_get_basename(film->file_path);
   GtkWidget *title_label = gtk_label_new(NULL);
+  gtk_label_set_lines(GTK_LABEL(title_label), 1);
 
   /* Set title with size markup */
   gchar *title_markup = g_strdup_printf(
@@ -111,20 +119,28 @@ static GtkWidget *create_poster_widget(ReelApp *app, Film *film) {
   }
 
   /* Year label */
+  gchar *year_markup = NULL;
   if (film->year > 0) {
-    gchar *year_markup =
+    year_markup =
         g_strdup_printf("<span size='%d'>(%d)</span>",
                         (gint)(font_size * 0.9 * PANGO_SCALE), film->year);
-    GtkWidget *year_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(year_label), year_markup);
-    gtk_label_set_xalign(GTK_LABEL(year_label), 0.5); /* Center */
-    g_free(year_markup);
-
-    GtkStyleContext *year_ctx = gtk_widget_get_style_context(year_label);
-    gtk_style_context_add_class(year_ctx, "poster-year");
-
-    gtk_box_pack_start(GTK_BOX(box), year_label, FALSE, FALSE, 0);
+  } else {
+    /* Keep row height consistent even when year is missing. */
+    year_markup =
+        g_strdup_printf("<span size='%d'> </span>",
+                        (gint)(font_size * 0.9 * PANGO_SCALE));
   }
+
+  GtkWidget *year_label = gtk_label_new(NULL);
+  gtk_label_set_lines(GTK_LABEL(year_label), 1);
+  gtk_label_set_markup(GTK_LABEL(year_label), year_markup);
+  gtk_label_set_xalign(GTK_LABEL(year_label), 0.5); /* Center */
+  g_free(year_markup);
+
+  GtkStyleContext *year_ctx = gtk_widget_get_style_context(year_label);
+  gtk_style_context_add_class(year_ctx, "poster-year");
+
+  gtk_box_pack_start(GTK_BOX(box), year_label, FALSE, FALSE, 0);
 
   /* Store film ID for click handling */
   g_object_set_data(G_OBJECT(box), "film_id", GINT_TO_POINTER(film->id));
@@ -149,6 +165,8 @@ static void on_poster_activated(GtkFlowBox *flowbox, GtkFlowBoxChild *child,
 GtkWidget *grid_create(ReelApp *app) {
   GtkWidget *flowbox = gtk_flow_box_new();
 
+  /* Non-homogeneous keeps cells tight to portrait poster width, avoiding
+     wide empty gutters caused by equal-width columns on large windows. */
   gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(flowbox), FALSE);
   gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(flowbox), GTK_SELECTION_SINGLE);
   gtk_flow_box_set_activate_on_single_click(GTK_FLOW_BOX(flowbox), TRUE);

@@ -115,6 +115,7 @@ struct _ReelApp {
   gint total_films;
   gint unmatched_films;
   ThemePreference theme_preference;
+  gboolean system_prefer_dark;
   gdouble scale_factor; /* DPI scale factor */
 
   /* Async */

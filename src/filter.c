@@ -109,9 +109,6 @@ GtkWidget *filter_bar_create(ReelApp *app) {
   gtk_box_pack_start(GTK_BOX(bar), sort_order_btn, FALSE, FALSE, 0);
   widgets->sort_order_btn = sort_order_btn;
 
-  /* Populate genres from database */
-  filter_bar_refresh(app);
-
   return bar;
 }
 
