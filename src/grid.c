@@ -290,6 +290,10 @@ GtkWidget *grid_create(ReelApp *app) {
   /* Non-homogeneous keeps cells tight to portrait poster width, avoiding
      wide empty gutters caused by equal-width columns on large windows. */
   gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(flowbox), FALSE);
+  /* Prevent sparse results from being vertically distributed to fill the
+     scrolled window; keep the grid anchored at the top. */
+  gtk_widget_set_valign(flowbox, GTK_ALIGN_START);
+  gtk_widget_set_vexpand(flowbox, FALSE);
   gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(flowbox), GTK_SELECTION_SINGLE);
   gtk_flow_box_set_activate_on_single_click(GTK_FLOW_BOX(flowbox), TRUE);
   gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(flowbox), 4);

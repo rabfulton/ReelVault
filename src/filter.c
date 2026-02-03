@@ -20,6 +20,7 @@ typedef struct {
 static void on_filter_changed(GtkWidget *widget, gpointer user_data);
 static void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
 static void on_sort_order_clicked(GtkButton *button, gpointer user_data);
+static void parse_search_text(ReelApp *app, const gchar *text);
 
 GtkWidget *filter_bar_create(ReelApp *app) {
   GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
@@ -35,33 +36,41 @@ GtkWidget *filter_bar_create(ReelApp *app) {
   g_object_set_data_full(G_OBJECT(bar), "widgets", widgets, g_free);
   g_object_set_data(G_OBJECT(bar), "app", app);
 
-  /* Search entry */
+  /* Layout: left controls, centered search, right controls */
+  GtkWidget *left = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+  gtk_widget_set_hexpand(left, TRUE);
+  gtk_widget_set_halign(left, GTK_ALIGN_START);
+  gtk_box_pack_start(GTK_BOX(bar), left, TRUE, TRUE, 0);
+
+  GtkWidget *right = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+  gtk_widget_set_hexpand(right, TRUE);
+  gtk_widget_set_halign(right, GTK_ALIGN_END);
+  gtk_box_pack_end(GTK_BOX(bar), right, TRUE, TRUE, 0);
+
+  /* Centered search entry */
   GtkWidget *search_entry = gtk_search_entry_new();
   gtk_entry_set_placeholder_text(GTK_ENTRY(search_entry), "Search films...");
-  gtk_widget_set_size_request(search_entry, 200, -1);
+  gtk_widget_set_size_request(search_entry, 420, -1);
+  gtk_widget_set_halign(search_entry, GTK_ALIGN_CENTER);
   g_signal_connect(search_entry, "search-changed",
                    G_CALLBACK(on_search_changed), app);
   gtk_box_pack_start(GTK_BOX(bar), search_entry, FALSE, FALSE, 0);
   widgets->search_entry = search_entry;
 
-  /* Separator */
-  gtk_box_pack_start(GTK_BOX(bar), gtk_separator_new(GTK_ORIENTATION_VERTICAL),
-                     FALSE, FALSE, 0);
-
   /* Genre filter */
   GtkWidget *genre_label = gtk_label_new("Genre:");
-  gtk_box_pack_start(GTK_BOX(bar), genre_label, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(left), genre_label, FALSE, FALSE, 0);
 
   GtkWidget *genre_combo = gtk_combo_box_text_new();
   gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(genre_combo), "", "All Genres");
   gtk_combo_box_set_active(GTK_COMBO_BOX(genre_combo), 0);
   g_signal_connect(genre_combo, "changed", G_CALLBACK(on_filter_changed), app);
-  gtk_box_pack_start(GTK_BOX(bar), genre_combo, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(left), genre_combo, FALSE, FALSE, 0);
   widgets->genre_combo = genre_combo;
 
   /* Year filter */
   GtkWidget *year_label = gtk_label_new("Year:");
-  gtk_box_pack_start(GTK_BOX(bar), year_label, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(left), year_label, FALSE, FALSE, 0);
 
   GtkWidget *year_combo = gtk_combo_box_text_new();
   gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(year_combo), "", "All Years");
@@ -77,17 +86,12 @@ GtkWidget *filter_bar_create(ReelApp *app) {
                             "Before 1980");
 
   g_signal_connect(year_combo, "changed", G_CALLBACK(on_filter_changed), app);
-  gtk_box_pack_start(GTK_BOX(bar), year_combo, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(left), year_combo, FALSE, FALSE, 0);
   widgets->year_combo = year_combo;
-
-  /* Spacer */
-  GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-  gtk_widget_set_hexpand(spacer, TRUE);
-  gtk_box_pack_start(GTK_BOX(bar), spacer, TRUE, TRUE, 0);
 
   /* Sort controls */
   GtkWidget *sort_label = gtk_label_new("Sort:");
-  gtk_box_pack_start(GTK_BOX(bar), sort_label, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(right), sort_label, FALSE, FALSE, 0);
 
   GtkWidget *sort_combo = gtk_combo_box_text_new();
   gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(sort_combo), "title", "Title");
@@ -97,7 +101,7 @@ GtkWidget *filter_bar_create(ReelApp *app) {
                             "Date Added");
   gtk_combo_box_set_active(GTK_COMBO_BOX(sort_combo), 0);
   g_signal_connect(sort_combo, "changed", G_CALLBACK(on_filter_changed), app);
-  gtk_box_pack_start(GTK_BOX(bar), sort_combo, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(right), sort_combo, FALSE, FALSE, 0);
   widgets->sort_combo = sort_combo;
 
   /* Sort order button */
@@ -106,7 +110,7 @@ GtkWidget *filter_bar_create(ReelApp *app) {
   gtk_widget_set_tooltip_text(sort_order_btn, "Toggle sort order");
   g_signal_connect(sort_order_btn, "clicked", G_CALLBACK(on_sort_order_clicked),
                    app);
-  gtk_box_pack_start(GTK_BOX(bar), sort_order_btn, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(right), sort_order_btn, FALSE, FALSE, 0);
   widgets->sort_order_btn = sort_order_btn;
 
   return bar;
@@ -176,7 +180,6 @@ static void update_filter_state(ReelApp *app) {
 
   /* Clear current filter */
   g_free(app->filter.genre);
-  g_free(app->filter.search_text);
   g_free(app->filter.sort_by);
 
   /* Genre */
@@ -217,14 +220,6 @@ static void update_filter_state(ReelApp *app) {
     }
   }
 
-  /* Search text */
-  const gchar *search = gtk_entry_get_text(GTK_ENTRY(widgets->search_entry));
-  if (search && strlen(search) > 0) {
-    app->filter.search_text = g_strdup(search);
-  } else {
-    app->filter.search_text = NULL;
-  }
-
   /* Sort */
   const gchar *sort_id =
       gtk_combo_box_get_active_id(GTK_COMBO_BOX(widgets->sort_combo));
@@ -235,14 +230,93 @@ static void on_filter_changed(GtkWidget *widget, gpointer user_data) {
   (void)widget;
   ReelApp *app = (ReelApp *)user_data;
   update_filter_state(app);
+  FilterWidgets *widgets =
+      g_object_get_data(G_OBJECT(app->filter_bar), "widgets");
+  if (widgets && widgets->search_entry) {
+    parse_search_text(
+        app, gtk_entry_get_text(GTK_ENTRY(widgets->search_entry)));
+  }
   window_refresh_films(app);
 }
 
 static void on_search_changed(GtkSearchEntry *entry, gpointer user_data) {
-  (void)entry;
   ReelApp *app = (ReelApp *)user_data;
   update_filter_state(app);
+  parse_search_text(app, gtk_entry_get_text(GTK_ENTRY(entry)));
   window_refresh_films(app);
+}
+
+static void parse_search_text(ReelApp *app, const gchar *text) {
+  if (!app)
+    return;
+
+  g_free(app->filter.search_text);
+  app->filter.search_text = NULL;
+  g_free(app->filter.actor);
+  app->filter.actor = NULL;
+  g_free(app->filter.plot_text);
+  app->filter.plot_text = NULL;
+
+  if (!text || !*text)
+    return;
+
+  gint argc = 0;
+  gchar **argv = NULL;
+  if (!g_shell_parse_argv(text, &argc, &argv, NULL) || argc <= 0) {
+    app->filter.search_text = g_strdup(text);
+    return;
+  }
+
+  GString *title = g_string_new("");
+
+  for (gint i = 0; i < argc; i++) {
+    const gchar *tok = argv[i];
+    if (!tok || !*tok)
+      continue;
+
+    const gchar *value = NULL;
+    const gchar *key = NULL;
+    if (g_str_has_prefix(tok, "actor:") || g_str_has_prefix(tok, "cast:") ||
+        g_str_has_prefix(tok, "plot:") || g_str_has_prefix(tok, "title:")) {
+      key = tok;
+      value = strchr(tok, ':');
+      value = value ? value + 1 : NULL;
+      if (value && *value) {
+        /* ok */
+      } else if ((i + 1) < argc) {
+        value = argv[++i];
+      }
+    }
+
+    if (key && value && *value) {
+      if (g_str_has_prefix(key, "actor:") || g_str_has_prefix(key, "cast:")) {
+        g_free(app->filter.actor);
+        app->filter.actor = g_strdup(value);
+        continue;
+      }
+      if (g_str_has_prefix(key, "plot:")) {
+        g_free(app->filter.plot_text);
+        app->filter.plot_text = g_strdup(value);
+        continue;
+      }
+      if (g_str_has_prefix(key, "title:")) {
+        if (title->len > 0)
+          g_string_append_c(title, ' ');
+        g_string_append(title, value);
+        continue;
+      }
+    }
+
+    if (title->len > 0)
+      g_string_append_c(title, ' ');
+    g_string_append(title, tok);
+  }
+
+  if (title->len > 0)
+    app->filter.search_text = g_strdup(title->str);
+
+  g_string_free(title, TRUE);
+  g_strfreev(argv);
 }
 
 static void on_sort_order_clicked(GtkButton *button, gpointer user_data) {

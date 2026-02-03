@@ -303,6 +303,12 @@ static GString *build_films_query(const FilterState *filter, gboolean paged,
     has_where = TRUE;
   }
 
+  if (filter && filter->plot_text && strlen(filter->plot_text) > 0) {
+    g_string_append_printf(sql, " %s f.plot LIKE '%%%s%%'",
+                           has_where ? "AND" : "WHERE", filter->plot_text);
+    has_where = TRUE;
+  }
+
   if (filter && filter->actor && strlen(filter->actor) > 0) {
     if (!has_where) {
       g_string_append(sql, " WHERE");

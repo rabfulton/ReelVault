@@ -280,5 +280,6 @@ void filter_state_clear(FilterState *filter) {
   g_free(filter->actor);
   g_free(filter->director);
   g_free(filter->search_text);
+  g_free(filter->plot_text);
   g_free(filter->sort_by);
 }

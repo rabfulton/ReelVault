@@ -116,6 +116,7 @@ static void filter_state_clone(FilterState *dst, const FilterState *src) {
   dst->actor = g_strdup(src->actor);
   dst->director = g_strdup(src->director);
   dst->search_text = g_strdup(src->search_text);
+  dst->plot_text = g_strdup(src->plot_text);
   dst->sort_by = g_strdup(src->sort_by);
   dst->sort_ascending = src->sort_ascending;
 }

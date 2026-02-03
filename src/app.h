@@ -84,6 +84,7 @@ struct _FilterState {
   gchar *actor;
   gchar *director;
   gchar *search_text;
+  gchar *plot_text;
   gchar *sort_by;
   gboolean sort_ascending;
 };

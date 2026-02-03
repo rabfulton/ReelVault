@@ -8,7 +8,7 @@ A native GTK3 application for browsing and launching your local film collection.
 
 - **Poster Grid:** Browse your film collection with cover art scraped from TMDB
 - **Metadata:** View cast, crew, ratings, plot summaries, and more
-- **Filtering:** Filter by genre, year, actor, director
+- **Filtering:** Filter by genre and year
 - **Sorting:** Sort by title, year, rating, date added
 - **External Player:** Launch films in your preferred video player
 - **Manual Matching:** Fix incorrect matches or identify unrecognized films
@@ -49,6 +49,23 @@ On first run, you'll be prompted to:
 2. Add your film library directories
 
 The config file is stored here: `~/.config/reelvault/config.ini`
+
+## Advanced Search
+
+The search bar supports simple `key:value` tokens:
+
+- `actor: Nick` or `cast:nick` (search cast/actors)
+- `plot: kidnapping` (search plot/overview text)
+- `title: dune` (search title explicitly)
+
+You can combine tokens and plain text. Plain text searches the title.
+
+Examples:
+```text
+actor:"Jason Momoa" dune
+plot:"time travel"
+title: alien
+```
 
 ## Building From Source
 

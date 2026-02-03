@@ -5,6 +5,7 @@ CC = gcc
 PKGS = gtk+-3.0 sqlite3 libcurl json-c
 CFLAGS = -Wall -Wextra -g -O2 $(shell pkg-config --cflags $(PKGS))
 LDFLAGS = $(shell pkg-config --libs $(PKGS)) -lpthread
+DEPFLAGS = -MMD -MP
 
 SRC_DIR = src
 BUILD_DIR = build
@@ -12,6 +13,7 @@ TARGET = reelvault
 
 SOURCES = $(wildcard $(SRC_DIR)/*.c)
 OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
+DEPS = $(OBJECTS:.o=.d)
 
 .PHONY: all clean install uninstall test
 
@@ -24,7 +26,9 @@ $(TARGET): $(OBJECTS)
 	$(CC) $(OBJECTS) -o $@ $(LDFLAGS)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+-include $(DEPS)
 
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET)
