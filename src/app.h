@@ -116,6 +116,8 @@ struct _ReelApp {
   gint unmatched_films;
   ThemePreference theme_preference;
   gboolean system_prefer_dark;
+  gchar *gtk_theme_name;         /* Optional override */
+  gchar *system_gtk_theme_name;  /* Captured at startup */
   gdouble scale_factor; /* DPI scale factor */
 
   /* Async */

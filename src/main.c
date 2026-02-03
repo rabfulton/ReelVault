@@ -103,6 +103,8 @@ void reel_app_free(ReelApp *app) {
   g_free(app->poster_cache_path);
   g_free(app->tmdb_api_key);
   g_free(app->player_command);
+  g_free(app->gtk_theme_name);
+  g_free(app->system_gtk_theme_name);
 
   if (app->library_paths) {
     g_strfreev(app->library_paths);

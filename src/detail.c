@@ -181,6 +181,12 @@ void detail_show(ReelApp *app, gint64 film_id) {
 
   gtk_window_set_default_size(GTK_WINDOW(dialog), 700, 500);
 
+  /* Use a header bar to match the main window style. */
+  GtkWidget *header = gtk_header_bar_new();
+  gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);
+  gtk_header_bar_set_title(GTK_HEADER_BAR(header), dialog_title);
+  gtk_window_set_titlebar(GTK_WINDOW(dialog), header);
+
   GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
   gtk_container_set_border_width(GTK_CONTAINER(content), 16);
 

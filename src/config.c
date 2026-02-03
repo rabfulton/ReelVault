@@ -52,6 +52,19 @@ gboolean config_load(ReelApp *app) {
     }
   }
 
+  /* Optional GTK theme override */
+  gchar *gtk_theme = g_key_file_get_string(keyfile, "ui", "gtk_theme", NULL);
+  if (gtk_theme) {
+    g_free(app->gtk_theme_name);
+    /* Treat empty string as unset. */
+    if (strlen(gtk_theme) == 0) {
+      g_free(gtk_theme);
+      app->gtk_theme_name = NULL;
+    } else {
+      app->gtk_theme_name = gtk_theme;
+    }
+  }
+
   g_key_file_free(keyfile);
   g_print("Configuration loaded from: %s\n", app->config_path);
   return TRUE;
@@ -79,6 +92,13 @@ gboolean config_save(ReelApp *app) {
 
   /* UI theme preference */
   g_key_file_set_integer(keyfile, "ui", "theme", (gint)app->theme_preference);
+
+  /* Optional GTK theme override */
+  if (app->gtk_theme_name) {
+    g_key_file_set_string(keyfile, "ui", "gtk_theme", app->gtk_theme_name);
+  } else {
+    g_key_file_set_string(keyfile, "ui", "gtk_theme", "");
+  }
 
   /* Write to file */
   GError *error = NULL;

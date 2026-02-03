@@ -79,6 +79,15 @@ void window_apply_theme(ReelApp *app, GtkWidget *toplevel) {
   if (!toplevel)
     return;
 
+  GtkSettings *settings = gtk_settings_get_default();
+
+  /* Apply GTK theme override (if set) */
+  if (app->gtk_theme_name && strlen(app->gtk_theme_name) > 0) {
+    g_object_set(settings, "gtk-theme-name", app->gtk_theme_name, NULL);
+  } else if (app->system_gtk_theme_name) {
+    g_object_set(settings, "gtk-theme-name", app->system_gtk_theme_name, NULL);
+  }
+
   gboolean prefer_dark = app->system_prefer_dark;
   if (app->theme_preference == THEME_DARK) {
     prefer_dark = TRUE;
@@ -86,8 +95,7 @@ void window_apply_theme(ReelApp *app, GtkWidget *toplevel) {
     prefer_dark = FALSE;
   }
 
-  g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme",
-               prefer_dark, NULL);
+  g_object_set(settings, "gtk-application-prefer-dark-theme", prefer_dark, NULL);
 
   gtk_widget_queue_draw(toplevel);
 }
@@ -216,6 +224,12 @@ void window_create(ReelApp *app) {
                  NULL);
   }
 
+  if (app->system_gtk_theme_name == NULL) {
+    gchar *theme_name = NULL;
+    g_object_get(gtk_settings_get_default(), "gtk-theme-name", &theme_name, NULL);
+    app->system_gtk_theme_name = theme_name;
+  }
+
   /* Get DPI scale factor from GDK */
   GdkScreen *screen = gdk_screen_get_default();
   if (screen) {
@@ -295,6 +309,59 @@ void window_create(ReelApp *app) {
   /* Apply theme CSS */
   apply_theme_css(app);
   startup_log("window_create: done");
+}
+
+static void scan_theme_root(GHashTable *set, const gchar *root) {
+  if (!root || !g_file_test(root, G_FILE_TEST_IS_DIR))
+    return;
+
+  GDir *dir = g_dir_open(root, 0, NULL);
+  if (!dir)
+    return;
+
+  const gchar *name;
+  while ((name = g_dir_read_name(dir)) != NULL) {
+    if (name[0] == '.')
+      continue;
+
+    gchar *gtk3_dir = g_build_filename(root, name, "gtk-3.0", NULL);
+    if (g_file_test(gtk3_dir, G_FILE_TEST_IS_DIR)) {
+      g_hash_table_add(set, g_strdup(name));
+    }
+    g_free(gtk3_dir);
+  }
+
+  g_dir_close(dir);
+}
+
+static gint theme_name_cmp(gconstpointer a, gconstpointer b) {
+  return g_ascii_strcasecmp((const gchar *)a, (const gchar *)b);
+}
+
+static GList *discover_gtk_themes(void) {
+  GHashTable *set = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+
+  scan_theme_root(set, "/usr/share/themes");
+  scan_theme_root(set, "/usr/local/share/themes");
+  gchar *home_themes = g_build_filename(g_get_home_dir(), ".themes", NULL);
+  scan_theme_root(set, home_themes);
+  g_free(home_themes);
+
+  gchar *user_themes = g_build_filename(g_get_user_data_dir(), "themes", NULL);
+  scan_theme_root(set, user_themes);
+  g_free(user_themes);
+
+  GList *names = NULL;
+  GHashTableIter iter;
+  gpointer key;
+  g_hash_table_iter_init(&iter, set);
+  while (g_hash_table_iter_next(&iter, &key, NULL)) {
+    names = g_list_prepend(names, g_strdup((const gchar *)key));
+  }
+  names = g_list_sort(names, theme_name_cmp);
+
+  g_hash_table_destroy(set);
+  return names; /* caller frees list + strings */
 }
 
 /* Apply comprehensive dark/light theme CSS */
@@ -612,6 +679,68 @@ void window_show_settings(ReelApp *app) {
   gtk_container_set_border_width(GTK_CONTAINER(content), 12);
   gtk_box_set_spacing(GTK_BOX(content), 12);
 
+  /* Appearance */
+  GtkWidget *appearance_frame = gtk_frame_new("Appearance");
+  gtk_box_pack_start(GTK_BOX(content), appearance_frame, FALSE, FALSE, 0);
+  gtk_container_set_border_width(GTK_CONTAINER(appearance_frame), 6);
+
+  GtkWidget *appearance_grid = gtk_grid_new();
+  gtk_grid_set_row_spacing(GTK_GRID(appearance_grid), 8);
+  gtk_grid_set_column_spacing(GTK_GRID(appearance_grid), 12);
+  gtk_container_add(GTK_CONTAINER(appearance_frame), appearance_grid);
+
+  GtkWidget *scheme_label = gtk_label_new("Color scheme:");
+  gtk_label_set_xalign(GTK_LABEL(scheme_label), 0);
+  gtk_widget_set_halign(scheme_label, GTK_ALIGN_START);
+  gtk_grid_attach(GTK_GRID(appearance_grid), scheme_label, 0, 0, 1, 1);
+
+  GtkWidget *scheme_combo = gtk_combo_box_text_new();
+  gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(scheme_combo), "system",
+                            "System");
+  gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(scheme_combo), "light", "Light");
+  gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(scheme_combo), "dark", "Dark");
+  const gchar *scheme_id = "system";
+  if (app->theme_preference == THEME_LIGHT) {
+    scheme_id = "light";
+  } else if (app->theme_preference == THEME_DARK) {
+    scheme_id = "dark";
+  }
+  gtk_combo_box_set_active_id(GTK_COMBO_BOX(scheme_combo), scheme_id);
+  gtk_widget_set_hexpand(scheme_combo, TRUE);
+  gtk_grid_attach(GTK_GRID(appearance_grid), scheme_combo, 1, 0, 1, 1);
+
+  GtkWidget *theme_label = gtk_label_new("GTK theme:");
+  gtk_label_set_xalign(GTK_LABEL(theme_label), 0);
+  gtk_widget_set_halign(theme_label, GTK_ALIGN_START);
+  gtk_grid_attach(GTK_GRID(appearance_grid), theme_label, 0, 1, 1, 1);
+
+  GtkWidget *theme_combo = gtk_combo_box_text_new();
+  gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(theme_combo),
+                            "__system_default__", "System Default");
+  GList *themes = discover_gtk_themes();
+  for (GList *l = themes; l != NULL; l = l->next) {
+    const gchar *name = (const gchar *)l->data;
+    if (name && *name) {
+      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(theme_combo), name, name);
+    }
+  }
+
+  if (app->gtk_theme_name && strlen(app->gtk_theme_name) > 0) {
+    if (!gtk_combo_box_set_active_id(GTK_COMBO_BOX(theme_combo),
+                                     app->gtk_theme_name)) {
+      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(theme_combo),
+                                app->gtk_theme_name, app->gtk_theme_name);
+      gtk_combo_box_set_active_id(GTK_COMBO_BOX(theme_combo),
+                                  app->gtk_theme_name);
+    }
+  } else {
+    gtk_combo_box_set_active_id(GTK_COMBO_BOX(theme_combo), "__system_default__");
+  }
+  gtk_widget_set_hexpand(theme_combo, TRUE);
+  gtk_grid_attach(GTK_GRID(appearance_grid), theme_combo, 1, 1, 1, 1);
+
+  g_list_free_full(themes, g_free);
+
   /* TMDB API Key */
   GtkWidget *api_frame = gtk_frame_new("TMDB API Key");
   gtk_box_pack_start(GTK_BOX(content), api_frame, FALSE, FALSE, 0);
@@ -650,6 +779,8 @@ void window_show_settings(ReelApp *app) {
   GtkWidget *lib_scroll = gtk_scrolled_window_new(NULL, NULL);
   gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(lib_scroll),
                                  GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+  /* Make the list tall enough to comfortably show ~4 rows. */
+  gtk_widget_set_size_request(lib_scroll, -1, (gint)(4 * 32 * app->scale_factor));
   gtk_box_pack_start(GTK_BOX(lib_box), lib_scroll, TRUE, TRUE, 0);
 
   GtkWidget *lib_list = gtk_list_box_new();
@@ -692,6 +823,28 @@ void window_show_settings(ReelApp *app) {
     /* Save settings */
     const gchar *api_text = gtk_entry_get_text(GTK_ENTRY(api_entry));
     const gchar *player_text = gtk_entry_get_text(GTK_ENTRY(player_entry));
+    const gchar *scheme_selected =
+        gtk_combo_box_get_active_id(GTK_COMBO_BOX(scheme_combo));
+    const gchar *gtk_theme_selected =
+        gtk_combo_box_get_active_id(GTK_COMBO_BOX(theme_combo));
+
+    if (scheme_selected) {
+      if (g_strcmp0(scheme_selected, "light") == 0) {
+        app->theme_preference = THEME_LIGHT;
+      } else if (g_strcmp0(scheme_selected, "dark") == 0) {
+        app->theme_preference = THEME_DARK;
+      } else {
+        app->theme_preference = THEME_SYSTEM;
+      }
+    }
+
+    g_free(app->gtk_theme_name);
+    app->gtk_theme_name = NULL;
+    if (gtk_theme_selected &&
+        g_strcmp0(gtk_theme_selected, "__system_default__") != 0 &&
+        strlen(gtk_theme_selected) > 0) {
+      app->gtk_theme_name = g_strdup(gtk_theme_selected);
+    }
 
     if (api_text && strlen(api_text) > 0) {
       g_free(app->tmdb_api_key);
@@ -703,6 +856,7 @@ void window_show_settings(ReelApp *app) {
       app->player_command = g_strdup(player_text);
     }
 
+    window_apply_theme(app, app->window);
     config_save(app);
   }
 
