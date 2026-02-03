@@ -120,6 +120,14 @@ struct _ReelApp {
   gchar *system_gtk_theme_name;  /* Captured at startup */
   gdouble scale_factor; /* DPI scale factor */
 
+  /* Window geometry (persisted) */
+  gboolean window_geometry_valid;
+  gint window_width;
+  gint window_height;
+  gint window_x;
+  gint window_y;
+  gboolean window_maximized;
+
   /* Async */
   GThreadPool *thread_pool;
   GAsyncQueue *ui_queue;

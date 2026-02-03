@@ -18,6 +18,12 @@ static void apply_theme_css(ReelApp *app);
 static void on_scan_clicked(GtkButton *button, gpointer user_data);
 static void on_settings_clicked(GtkButton *button, gpointer user_data);
 static void on_unmatched_clicked(GtkButton *button, gpointer user_data);
+static gboolean on_main_window_configure(GtkWidget *widget,
+                                        GdkEventConfigure *event,
+                                        gpointer user_data);
+static gboolean on_main_window_state(GtkWidget *widget,
+                                     GdkEventWindowState *event,
+                                     gpointer user_data);
 
 static gboolean startup_debug_enabled(void) {
   static gint inited = 0;
@@ -248,8 +254,27 @@ void window_create(ReelApp *app) {
   /* Create main window */
   app->window = gtk_application_window_new(app->app);
   gtk_window_set_title(GTK_WINDOW(app->window), APP_NAME);
-  gtk_window_set_default_size(GTK_WINDOW(app->window), 1200, 800);
+  if (app->window_geometry_valid && app->window_width > 0 &&
+      app->window_height > 0) {
+    gtk_window_set_default_size(GTK_WINDOW(app->window), app->window_width,
+                                app->window_height);
+  } else {
+    gtk_window_set_default_size(GTK_WINDOW(app->window), 1200, 800);
+  }
   gtk_window_set_position(GTK_WINDOW(app->window), GTK_WIN_POS_CENTER);
+
+  if (app->window_geometry_valid && !app->window_maximized) {
+    gtk_window_move(GTK_WINDOW(app->window), app->window_x, app->window_y);
+  }
+
+  if (app->window_maximized) {
+    gtk_window_maximize(GTK_WINDOW(app->window));
+  }
+
+  g_signal_connect(app->window, "configure-event",
+                   G_CALLBACK(on_main_window_configure), app);
+  g_signal_connect(app->window, "window-state-event",
+                   G_CALLBACK(on_main_window_state), app);
 
   /* Main vertical box */
   GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -309,6 +334,43 @@ void window_create(ReelApp *app) {
   /* Apply theme CSS */
   apply_theme_css(app);
   startup_log("window_create: done");
+}
+
+static gboolean on_main_window_configure(GtkWidget *widget,
+                                        GdkEventConfigure *event,
+                                        gpointer user_data) {
+  (void)widget;
+  ReelApp *app = (ReelApp *)user_data;
+  if (!app || !event)
+    return GDK_EVENT_PROPAGATE;
+
+  if (app->window_maximized)
+    return GDK_EVENT_PROPAGATE;
+
+  if (event->width > 0 && event->height > 0) {
+    app->window_width = event->width;
+    app->window_height = event->height;
+    app->window_geometry_valid = TRUE;
+  }
+
+  /* On some backends, x/y may be 0 or unreliable; store anyway. */
+  app->window_x = event->x;
+  app->window_y = event->y;
+
+  return GDK_EVENT_PROPAGATE;
+}
+
+static gboolean on_main_window_state(GtkWidget *widget,
+                                     GdkEventWindowState *event,
+                                     gpointer user_data) {
+  (void)widget;
+  ReelApp *app = (ReelApp *)user_data;
+  if (!app || !event)
+    return GDK_EVENT_PROPAGATE;
+
+  app->window_maximized =
+      (event->new_window_state & GDK_WINDOW_STATE_MAXIMIZED) != 0;
+  return GDK_EVENT_PROPAGATE;
 }
 
 static void scan_theme_root(GHashTable *set, const gchar *root) {

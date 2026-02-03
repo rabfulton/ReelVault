@@ -65,6 +65,29 @@ gboolean config_load(ReelApp *app) {
     }
   }
 
+  /* Window geometry */
+  if (g_key_file_has_key(keyfile, "ui", "window_width", NULL) &&
+      g_key_file_has_key(keyfile, "ui", "window_height", NULL)) {
+    gint w = g_key_file_get_integer(keyfile, "ui", "window_width", NULL);
+    gint h = g_key_file_get_integer(keyfile, "ui", "window_height", NULL);
+    if (w > 0 && h > 0) {
+      app->window_width = w;
+      app->window_height = h;
+      app->window_geometry_valid = TRUE;
+    }
+  }
+
+  if (g_key_file_has_key(keyfile, "ui", "window_x", NULL) &&
+      g_key_file_has_key(keyfile, "ui", "window_y", NULL)) {
+    app->window_x = g_key_file_get_integer(keyfile, "ui", "window_x", NULL);
+    app->window_y = g_key_file_get_integer(keyfile, "ui", "window_y", NULL);
+  }
+
+  if (g_key_file_has_key(keyfile, "ui", "window_maximized", NULL)) {
+    app->window_maximized =
+        g_key_file_get_boolean(keyfile, "ui", "window_maximized", NULL);
+  }
+
   g_key_file_free(keyfile);
   g_print("Configuration loaded from: %s\n", app->config_path);
   return TRUE;
@@ -99,6 +122,17 @@ gboolean config_save(ReelApp *app) {
   } else {
     g_key_file_set_string(keyfile, "ui", "gtk_theme", "");
   }
+
+  /* Window geometry */
+  if (app->window_geometry_valid && app->window_width > 0 &&
+      app->window_height > 0) {
+    g_key_file_set_integer(keyfile, "ui", "window_width", app->window_width);
+    g_key_file_set_integer(keyfile, "ui", "window_height", app->window_height);
+    g_key_file_set_integer(keyfile, "ui", "window_x", app->window_x);
+    g_key_file_set_integer(keyfile, "ui", "window_y", app->window_y);
+  }
+  g_key_file_set_boolean(keyfile, "ui", "window_maximized",
+                         app->window_maximized);
 
   /* Write to file */
   GError *error = NULL;
