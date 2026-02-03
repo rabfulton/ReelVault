@@ -20,12 +20,15 @@ typedef struct {
 static void on_filter_changed(GtkWidget *widget, gpointer user_data);
 static void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
 static void on_sort_order_clicked(GtkButton *button, gpointer user_data);
+static void on_scan_clicked(GtkButton *button, gpointer user_data);
+static void on_settings_clicked(GtkButton *button, gpointer user_data);
 static void parse_search_text(ReelApp *app, const gchar *text);
 
 GtkWidget *filter_bar_create(ReelApp *app) {
-  /* Use a 3-column grid so the search entry is truly centered regardless of
-     left/right control widths. */
+  /* Use a 3-column grid so the search entry can be accurately centered. */
   GtkWidget *bar = gtk_grid_new();
+  gtk_widget_set_hexpand(bar, TRUE);
+  gtk_widget_set_halign(bar, GTK_ALIGN_FILL);
   gtk_widget_set_margin_start(bar, 12);
   gtk_widget_set_margin_end(bar, 12);
   gtk_widget_set_margin_top(bar, 8);
@@ -42,19 +45,14 @@ GtkWidget *filter_bar_create(ReelApp *app) {
 
   /* Layout: left controls, centered search, right controls */
   GtkWidget *left = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-  gtk_widget_set_hexpand(left, TRUE);
-  gtk_widget_set_halign(left, GTK_ALIGN_FILL);
   gtk_widget_set_halign(left, GTK_ALIGN_START);
   gtk_grid_attach(GTK_GRID(bar), left, 0, 0, 1, 1);
 
   GtkWidget *right = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-  gtk_widget_set_hexpand(right, TRUE);
-  gtk_widget_set_halign(right, GTK_ALIGN_FILL);
   gtk_widget_set_halign(right, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(bar), right, 2, 0, 1, 1);
 
-  /* Ensure the left and right areas take equal width so the search entry is
-     visually centered regardless of control widths. */
+  /* Keep left/right regions equal width so the center column is truly centered. */
   GtkSizeGroup *side_group = gtk_size_group_new(GTK_SIZE_GROUP_HORIZONTAL);
   gtk_size_group_add_widget(side_group, left);
   gtk_size_group_add_widget(side_group, right);
@@ -72,9 +70,6 @@ GtkWidget *filter_bar_create(ReelApp *app) {
   widgets->search_entry = search_entry;
 
   /* Genre filter */
-  GtkWidget *genre_label = gtk_label_new("Genre:");
-  gtk_box_pack_start(GTK_BOX(left), genre_label, FALSE, FALSE, 0);
-
   GtkWidget *genre_combo = gtk_combo_box_text_new();
   gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(genre_combo), "", "All Genres");
   gtk_combo_box_set_active(GTK_COMBO_BOX(genre_combo), 0);
@@ -83,9 +78,6 @@ GtkWidget *filter_bar_create(ReelApp *app) {
   widgets->genre_combo = genre_combo;
 
   /* Year filter */
-  GtkWidget *year_label = gtk_label_new("Year:");
-  gtk_box_pack_start(GTK_BOX(left), year_label, FALSE, FALSE, 0);
-
   GtkWidget *year_combo = gtk_combo_box_text_new();
   gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(year_combo), "", "All Years");
   gtk_combo_box_set_active(GTK_COMBO_BOX(year_combo), 0);
@@ -126,6 +118,20 @@ GtkWidget *filter_bar_create(ReelApp *app) {
                    app);
   gtk_box_pack_start(GTK_BOX(right), sort_order_btn, FALSE, FALSE, 0);
   widgets->sort_order_btn = sort_order_btn;
+
+  /* Scan + Settings (moved from title bar) */
+  GtkWidget *scan_btn = gtk_button_new_from_icon_name("view-refresh-symbolic",
+                                                      GTK_ICON_SIZE_BUTTON);
+  gtk_widget_set_tooltip_text(scan_btn, "Scan Library");
+  g_signal_connect(scan_btn, "clicked", G_CALLBACK(on_scan_clicked), app);
+  gtk_box_pack_start(GTK_BOX(right), scan_btn, FALSE, FALSE, 0);
+
+  GtkWidget *settings_btn = gtk_button_new_from_icon_name(
+      "emblem-system-symbolic", GTK_ICON_SIZE_BUTTON);
+  gtk_widget_set_tooltip_text(settings_btn, "Settings");
+  g_signal_connect(settings_btn, "clicked", G_CALLBACK(on_settings_clicked),
+                   app);
+  gtk_box_pack_start(GTK_BOX(right), settings_btn, FALSE, FALSE, 0);
 
   return bar;
 }
@@ -349,4 +355,30 @@ static void on_sort_order_clicked(GtkButton *button, gpointer user_data) {
   }
 
   window_refresh_films(app);
+}
+
+static void on_scan_clicked(GtkButton *button, gpointer user_data) {
+  (void)button;
+  ReelApp *app = (ReelApp *)user_data;
+  if (!app)
+    return;
+
+  if (app->library_paths == NULL || app->library_paths_count == 0) {
+    GtkWidget *dialog =
+        gtk_message_dialog_new(GTK_WINDOW(app->window), GTK_DIALOG_MODAL,
+                               GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+                               "No library paths configured.\nGo to Settings "
+                               "to add your film directories.");
+    gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+    return;
+  }
+
+  window_scan_library(app);
+}
+
+static void on_settings_clicked(GtkButton *button, gpointer user_data) {
+  (void)button;
+  ReelApp *app = (ReelApp *)user_data;
+  window_show_settings(app);
 }

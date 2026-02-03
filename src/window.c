@@ -15,9 +15,6 @@
 
 /* Forward declarations */
 static void apply_theme_css(ReelApp *app);
-static void on_scan_clicked(GtkButton *button, gpointer user_data);
-static void on_settings_clicked(GtkButton *button, gpointer user_data);
-static void on_unmatched_clicked(GtkButton *button, gpointer user_data);
 static gboolean on_main_window_configure(GtkWidget *widget,
                                         GdkEventConfigure *event,
                                         gpointer user_data);
@@ -288,28 +285,6 @@ void window_create(ReelApp *app) {
   gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);
   gtk_header_bar_set_title(GTK_HEADER_BAR(header), APP_NAME);
   gtk_window_set_titlebar(GTK_WINDOW(app->window), header);
-
-  /* Header bar buttons - left side */
-  GtkWidget *scan_btn = gtk_button_new_from_icon_name("view-refresh-symbolic",
-                                                      GTK_ICON_SIZE_BUTTON);
-  gtk_widget_set_tooltip_text(scan_btn, "Scan Library");
-  g_signal_connect(scan_btn, "clicked", G_CALLBACK(on_scan_clicked), app);
-  gtk_header_bar_pack_start(GTK_HEADER_BAR(header), scan_btn);
-
-  GtkWidget *unmatched_btn = gtk_button_new_from_icon_name(
-      "dialog-question-symbolic", GTK_ICON_SIZE_BUTTON);
-  gtk_widget_set_tooltip_text(unmatched_btn, "View Unmatched Films");
-  g_signal_connect(unmatched_btn, "clicked", G_CALLBACK(on_unmatched_clicked),
-                   app);
-  gtk_header_bar_pack_start(GTK_HEADER_BAR(header), unmatched_btn);
-
-  /* Header bar buttons - right side */
-  GtkWidget *settings_btn = gtk_button_new_from_icon_name(
-      "emblem-system-symbolic", GTK_ICON_SIZE_BUTTON);
-  gtk_widget_set_tooltip_text(settings_btn, "Settings");
-  g_signal_connect(settings_btn, "clicked", G_CALLBACK(on_settings_clicked),
-                   app);
-  gtk_header_bar_pack_end(GTK_HEADER_BAR(header), settings_btn);
 
   /* Filter bar */
   app->filter_bar = filter_bar_create(app);
@@ -596,36 +571,6 @@ void window_refresh_film(ReelApp *app, gint64 film_id) {
     filter_bar_refresh(app);
     app->genres_dirty = FALSE;
   }
-}
-
-static void on_scan_clicked(GtkButton *button, gpointer user_data) {
-  ReelApp *app = (ReelApp *)user_data;
-  (void)button;
-
-  if (app->library_paths == NULL || app->library_paths_count == 0) {
-    GtkWidget *dialog =
-        gtk_message_dialog_new(GTK_WINDOW(app->window), GTK_DIALOG_MODAL,
-                               GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
-                               "No library paths configured.\nGo to Settings "
-                               "to add your film directories.");
-    gtk_dialog_run(GTK_DIALOG(dialog));
-    gtk_widget_destroy(dialog);
-    return;
-  }
-
-  window_scan_library(app);
-}
-
-static void on_settings_clicked(GtkButton *button, gpointer user_data) {
-  ReelApp *app = (ReelApp *)user_data;
-  (void)button;
-  window_show_settings(app);
-}
-
-static void on_unmatched_clicked(GtkButton *button, gpointer user_data) {
-  ReelApp *app = (ReelApp *)user_data;
-  (void)button;
-  window_show_unmatched(app);
 }
 
 typedef struct {
@@ -1006,81 +951,4 @@ void window_scan_library(ReelApp *app) {
   gtk_label_set_text(GTK_LABEL(ui->label), "Import complete.");
   gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ui->progress), 1.0);
   import_progress_destroy(ui);
-}
-
-/* Callback for match button in unmatched list */
-static void on_match_film_clicked(GtkButton *btn, gpointer user_data) {
-  (void)user_data;
-  ReelApp *app = g_object_get_data(G_OBJECT(btn), "app");
-  gint64 film_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "film_id"));
-  /* TODO: Open match dialog */
-  g_print("Match film ID: %ld\n", film_id);
-  (void)app;
-}
-
-void window_show_unmatched(ReelApp *app) {
-  GList *unmatched = db_films_get_unmatched(app);
-  gint count = g_list_length(unmatched);
-
-  if (count == 0) {
-    GtkWidget *dialog = gtk_message_dialog_new(
-        GTK_WINDOW(app->window), GTK_DIALOG_MODAL, GTK_MESSAGE_INFO,
-        GTK_BUTTONS_OK, "All films are matched!");
-    window_apply_theme(app, dialog);
-    gtk_dialog_run(GTK_DIALOG(dialog));
-    gtk_widget_destroy(dialog);
-    g_list_free_full(unmatched, (GDestroyNotify)film_free);
-    return;
-  }
-
-  /* Create unmatched films dialog */
-  GtkWidget *dialog = gtk_dialog_new_with_buttons(
-      "Unmatched Films", GTK_WINDOW(app->window),
-      GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, "_Close",
-      GTK_RESPONSE_CLOSE, NULL);
-
-  gtk_window_set_default_size(GTK_WINDOW(dialog), 600, 400);
-  window_apply_theme(app, dialog);
-
-  GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
-
-  GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
-  gtk_box_pack_start(GTK_BOX(content), scroll, TRUE, TRUE, 0);
-
-  GtkWidget *list = gtk_list_box_new();
-  gtk_container_add(GTK_CONTAINER(scroll), list);
-
-  for (GList *l = unmatched; l != NULL; l = l->next) {
-    Film *film = (Film *)l->data;
-    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_container_set_border_width(GTK_CONTAINER(row), 6);
-
-    GtkWidget *label = gtk_label_new(film->file_path);
-    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_START);
-    gtk_label_set_xalign(GTK_LABEL(label), 0);
-    gtk_widget_set_hexpand(label, TRUE);
-    gtk_box_pack_start(GTK_BOX(row), label, TRUE, TRUE, 0);
-
-    GtkWidget *match_btn = gtk_button_new_with_label("Match...");
-    g_object_set_data(G_OBJECT(match_btn), "film_id",
-                      GINT_TO_POINTER(film->id));
-    g_object_set_data(G_OBJECT(match_btn), "app", app);
-    g_object_set_data(G_OBJECT(match_btn), "parent_dialog", dialog);
-
-    g_signal_connect(match_btn, "clicked", G_CALLBACK(on_match_film_clicked),
-                     NULL);
-
-    gtk_box_pack_end(GTK_BOX(row), match_btn, FALSE, FALSE, 0);
-
-    gtk_list_box_insert(GTK_LIST_BOX(list), row, -1);
-  }
-
-  gtk_widget_show_all(dialog);
-  gtk_dialog_run(GTK_DIALOG(dialog));
-  gtk_widget_destroy(dialog);
-
-  g_list_free_full(unmatched, (GDestroyNotify)film_free);
-
-  /* Refresh in case anything changed */
-  window_refresh_films(app);
 }

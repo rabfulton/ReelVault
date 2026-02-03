@@ -17,6 +17,5 @@ void window_update_status_bar(ReelApp *app);
 /* Menu/toolbar actions */
 void window_show_settings(ReelApp *app);
 void window_scan_library(ReelApp *app);
-void window_show_unmatched(ReelApp *app);
 
 #endif /* REELGTK_WINDOW_H */
