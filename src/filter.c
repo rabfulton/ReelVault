@@ -23,11 +23,15 @@ static void on_sort_order_clicked(GtkButton *button, gpointer user_data);
 static void parse_search_text(ReelApp *app, const gchar *text);
 
 GtkWidget *filter_bar_create(ReelApp *app) {
-  GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+  /* Use a 3-column grid so the search entry is truly centered regardless of
+     left/right control widths. */
+  GtkWidget *bar = gtk_grid_new();
   gtk_widget_set_margin_start(bar, 12);
   gtk_widget_set_margin_end(bar, 12);
   gtk_widget_set_margin_top(bar, 8);
   gtk_widget_set_margin_bottom(bar, 8);
+  gtk_grid_set_column_spacing(GTK_GRID(bar), 12);
+  gtk_grid_set_row_spacing(GTK_GRID(bar), 0);
 
   GtkStyleContext *ctx = gtk_widget_get_style_context(bar);
   gtk_style_context_add_class(ctx, "filter-bar");
@@ -39,22 +43,32 @@ GtkWidget *filter_bar_create(ReelApp *app) {
   /* Layout: left controls, centered search, right controls */
   GtkWidget *left = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
   gtk_widget_set_hexpand(left, TRUE);
+  gtk_widget_set_halign(left, GTK_ALIGN_FILL);
   gtk_widget_set_halign(left, GTK_ALIGN_START);
-  gtk_box_pack_start(GTK_BOX(bar), left, TRUE, TRUE, 0);
+  gtk_grid_attach(GTK_GRID(bar), left, 0, 0, 1, 1);
 
   GtkWidget *right = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
   gtk_widget_set_hexpand(right, TRUE);
+  gtk_widget_set_halign(right, GTK_ALIGN_FILL);
   gtk_widget_set_halign(right, GTK_ALIGN_END);
-  gtk_box_pack_end(GTK_BOX(bar), right, TRUE, TRUE, 0);
+  gtk_grid_attach(GTK_GRID(bar), right, 2, 0, 1, 1);
+
+  /* Ensure the left and right areas take equal width so the search entry is
+     visually centered regardless of control widths. */
+  GtkSizeGroup *side_group = gtk_size_group_new(GTK_SIZE_GROUP_HORIZONTAL);
+  gtk_size_group_add_widget(side_group, left);
+  gtk_size_group_add_widget(side_group, right);
+  g_object_unref(side_group);
 
   /* Centered search entry */
   GtkWidget *search_entry = gtk_search_entry_new();
   gtk_entry_set_placeholder_text(GTK_ENTRY(search_entry), "Search films...");
   gtk_widget_set_size_request(search_entry, 420, -1);
   gtk_widget_set_halign(search_entry, GTK_ALIGN_CENTER);
+  gtk_widget_set_hexpand(search_entry, TRUE);
   g_signal_connect(search_entry, "search-changed",
                    G_CALLBACK(on_search_changed), app);
-  gtk_box_pack_start(GTK_BOX(bar), search_entry, FALSE, FALSE, 0);
+  gtk_grid_attach(GTK_GRID(bar), search_entry, 1, 0, 1, 1);
   widgets->search_entry = search_entry;
 
   /* Genre filter */
