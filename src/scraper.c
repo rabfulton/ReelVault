@@ -13,6 +13,7 @@
 #define CURL_DISABLE_TYPECHECK 1
 #include <curl/curl.h>
 #include <json-c/json.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
 
 /* Include our headers after curl to avoid macro conflicts */
 #include "config.h"
@@ -527,6 +528,7 @@ gboolean scraper_fetch_and_update(ReelApp *app, gint64 film_id, gint tmdb_id) {
         db_genre_add_to_film(app, film_id, json_object_get_string(val));
       }
     }
+    app->genres_dirty = TRUE;
   }
 
   /* Process credits */
@@ -602,6 +604,26 @@ gboolean scraper_download_poster(ReelApp *app, const gchar *poster_path,
 
   gboolean success = download_file(url, dest);
 
+  if (success) {
+    gchar *thumb =
+        g_build_filename(app->poster_cache_path,
+                         g_strdup_printf("%d_thumb.jpg", tmdb_id), NULL);
+
+    if (!g_file_test(thumb, G_FILE_TEST_EXISTS)) {
+      GError *error = NULL;
+      GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(
+          dest, POSTER_THUMB_WIDTH, POSTER_THUMB_HEIGHT, TRUE, &error);
+      if (pixbuf) {
+        gdk_pixbuf_save(pixbuf, thumb, "jpeg", &error, "quality", "85", NULL);
+        g_object_unref(pixbuf);
+      }
+      if (error)
+        g_error_free(error);
+    }
+
+    g_free(thumb);
+  }
+
   g_free(url);
   g_free(dest);
 
@@ -669,7 +691,19 @@ static gpointer scraper_thread_func(gpointer data) {
   ScraperContext *ctx = (ScraperContext *)data;
   ReelApp *app = ctx->app;
 
-  GList *unmatched = db_films_get_unmatched(app);
+  sqlite3 *db = NULL;
+  if (sqlite3_open(app->db_path, &db) != SQLITE_OK) {
+    if (db)
+      sqlite3_close(db);
+    g_idle_add(scraper_done_idle, ctx);
+    return NULL;
+  }
+  sqlite3_exec(db, "PRAGMA foreign_keys = ON;", NULL, NULL, NULL);
+
+  ReelApp thread_app = *app;
+  thread_app.db = db;
+
+  GList *unmatched = db_films_get_unmatched(&thread_app);
   ctx->total = g_list_length(unmatched);
   ctx->done = 0;
 
@@ -683,9 +717,9 @@ static gpointer scraper_thread_func(gpointer data) {
 
     GList *results;
     if (film->media_type == MEDIA_TV_SEASON) {
-      results = scraper_search_tv(app, film->title, film->year);
+      results = scraper_search_tv(&thread_app, film->title, film->year);
     } else {
-      results = scraper_search_tmdb(app, film->title, film->year);
+      results = scraper_search_tmdb(&thread_app, film->title, film->year);
     }
 
     if (results) {
@@ -708,7 +742,7 @@ static gpointer scraper_thread_func(gpointer data) {
       }
 
       if (good_match) {
-        scraper_fetch_and_update(app, film->id, first->tmdb_id);
+        scraper_fetch_and_update(&thread_app, film->id, first->tmdb_id);
       }
 
       g_list_free_full(results, (GDestroyNotify)tmdb_search_result_free);
@@ -728,6 +762,7 @@ static gpointer scraper_thread_func(gpointer data) {
   }
 
   g_list_free_full(unmatched, (GDestroyNotify)film_free);
+  sqlite3_close(db);
   g_idle_add(scraper_done_idle, ctx);
 
   return NULL;

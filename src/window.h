@@ -11,6 +11,7 @@ void window_apply_theme(ReelApp *app, GtkWidget *toplevel);
 
 /* Update window state */
 void window_refresh_films(ReelApp *app);
+void window_refresh_film(ReelApp *app, gint64 film_id);
 void window_update_status_bar(ReelApp *app);
 
 /* Menu/toolbar actions */

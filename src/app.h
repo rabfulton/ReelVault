@@ -122,6 +122,13 @@ struct _ReelApp {
   GThreadPool *thread_pool;
   GAsyncQueue *ui_queue;
   guint ui_update_source;
+
+  /* Async film loading / grid population */
+  guint films_refresh_gen;
+  gboolean films_loading;
+  GList *grid_pending; /* List of Film* (nodes owned by grid) */
+  guint grid_idle_source;
+  gboolean genres_dirty;
 };
 
 /* Function prototypes - app lifecycle */

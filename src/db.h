@@ -30,6 +30,14 @@ GList *db_films_get_unmatched(ReelApp *app);
 gint db_films_count(ReelApp *app);
 gint db_films_count_unmatched(ReelApp *app);
 
+/* Read-only helpers for background loading */
+sqlite3 *db_open_readonly(const gchar *db_path);
+void db_close_handle(sqlite3 *db);
+GList *db_films_get_page_db(sqlite3 *db, const FilterState *filter, gint limit,
+                            gint offset);
+gint db_films_count_db(sqlite3 *db);
+gint db_films_count_unmatched_db(sqlite3 *db);
+
 /* Additional file attachments (multi-part, alternate cuts) */
 gboolean db_film_file_attach(ReelApp *app, gint64 film_id,
                              const gchar *file_path, const gchar *label,

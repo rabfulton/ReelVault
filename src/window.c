@@ -18,6 +18,33 @@ static void on_scan_clicked(GtkButton *button, gpointer user_data);
 static void on_settings_clicked(GtkButton *button, gpointer user_data);
 static void on_unmatched_clicked(GtkButton *button, gpointer user_data);
 
+typedef struct {
+  ReelApp *app;
+  guint gen;
+  gchar *db_path;
+  FilterState filter;
+} FilmsLoadRequest;
+
+typedef struct {
+  ReelApp *app;
+  guint gen;
+  GList *films; /* owned */
+} FilmsPagePayload;
+
+typedef struct {
+  ReelApp *app;
+  guint gen;
+  gint total;
+  gint unmatched;
+} FilmsCountsPayload;
+
+static void filter_state_clone(FilterState *dst, const FilterState *src);
+static void filter_state_free_members(FilterState *f);
+static gboolean films_counts_idle(gpointer data);
+static gboolean films_page_idle(gpointer data);
+static gboolean films_done_idle(gpointer data);
+static gpointer films_load_thread(gpointer data);
+
 void window_apply_theme(ReelApp *app, GtkWidget *toplevel) {
   if (!toplevel)
     return;
@@ -33,6 +60,113 @@ void window_apply_theme(ReelApp *app, GtkWidget *toplevel) {
                prefer_dark, NULL);
 
   gtk_widget_queue_draw(toplevel);
+}
+
+static void filter_state_clone(FilterState *dst, const FilterState *src) {
+  memset(dst, 0, sizeof(*dst));
+  if (!src)
+    return;
+  dst->genre = g_strdup(src->genre);
+  dst->year_from = src->year_from;
+  dst->year_to = src->year_to;
+  dst->actor = g_strdup(src->actor);
+  dst->director = g_strdup(src->director);
+  dst->search_text = g_strdup(src->search_text);
+  dst->sort_by = g_strdup(src->sort_by);
+  dst->sort_ascending = src->sort_ascending;
+}
+
+static void filter_state_free_members(FilterState *f) {
+  if (!f)
+    return;
+  g_free(f->genre);
+  g_free(f->actor);
+  g_free(f->director);
+  g_free(f->search_text);
+  g_free(f->sort_by);
+  memset(f, 0, sizeof(*f));
+}
+
+static gboolean films_counts_idle(gpointer data) {
+  FilmsCountsPayload *p = (FilmsCountsPayload *)data;
+  if (p->gen != p->app->films_refresh_gen) {
+    g_free(p);
+    return G_SOURCE_REMOVE;
+  }
+  p->app->total_films = p->total;
+  p->app->unmatched_films = p->unmatched;
+  window_update_status_bar(p->app);
+  g_free(p);
+  return G_SOURCE_REMOVE;
+}
+
+static gboolean films_page_idle(gpointer data) {
+  FilmsPagePayload *p = (FilmsPagePayload *)data;
+  if (p->gen != p->app->films_refresh_gen) {
+    g_list_free_full(p->films, (GDestroyNotify)film_free);
+    g_free(p);
+    return G_SOURCE_REMOVE;
+  }
+
+  p->app->films = g_list_concat(p->app->films, p->films);
+  grid_append_films(p->app, p->films);
+  g_free(p);
+  return G_SOURCE_REMOVE;
+}
+
+static gboolean films_done_idle(gpointer data) {
+  FilmsLoadRequest *req = (FilmsLoadRequest *)data;
+  if (req->gen == req->app->films_refresh_gen) {
+    req->app->films_loading = FALSE;
+    if (req->app->genres_dirty) {
+      filter_bar_refresh(req->app);
+      req->app->genres_dirty = FALSE;
+    }
+  }
+
+  filter_state_free_members(&req->filter);
+  g_free(req->db_path);
+  g_free(req);
+  return G_SOURCE_REMOVE;
+}
+
+static gpointer films_load_thread(gpointer data) {
+  FilmsLoadRequest *req = (FilmsLoadRequest *)data;
+  sqlite3 *db = db_open_readonly(req->db_path);
+  if (!db) {
+    g_idle_add(films_done_idle, req);
+    return NULL;
+  }
+
+  FilmsCountsPayload *counts = g_new0(FilmsCountsPayload, 1);
+  counts->app = req->app;
+  counts->gen = req->gen;
+  counts->total = db_films_count_db(db);
+  counts->unmatched = db_films_count_unmatched_db(db);
+  g_idle_add(films_counts_idle, counts);
+
+  const int page_size = 250;
+  for (int offset = 0;; offset += page_size) {
+    if (req->gen != req->app->films_refresh_gen)
+      break;
+
+    GList *page = db_films_get_page_db(db, &req->filter, page_size, offset);
+    if (!page)
+      break;
+
+    FilmsPagePayload *p = g_new0(FilmsPagePayload, 1);
+    p->app = req->app;
+    p->gen = req->gen;
+    p->films = page;
+    g_idle_add(films_page_idle, p);
+
+    if (g_list_length(page) < page_size)
+      break;
+  }
+
+  db_close_handle(db);
+  g_idle_add(films_done_idle, req);
+  return NULL;
 }
 
 void window_create(ReelApp *app) {
@@ -204,24 +338,23 @@ static void apply_theme_css(ReelApp *app) {
 }
 
 void window_refresh_films(ReelApp *app) {
-  /* Free existing list */
+  /* Cancel any existing grid population and clear current UI quickly. */
+  app->films_refresh_gen++;
+  app->films_loading = TRUE;
+
   if (app->films) {
     g_list_free_full(app->films, (GDestroyNotify)film_free);
     app->films = NULL;
   }
+  grid_clear(app);
 
-  /* Load from database with current filter */
-  app->films = db_films_get_all(app, &app->filter);
+  FilmsLoadRequest *req = g_new0(FilmsLoadRequest, 1);
+  req->app = app;
+  req->gen = app->films_refresh_gen;
+  req->db_path = g_strdup(app->db_path);
+  filter_state_clone(&req->filter, &app->filter);
 
-  /* Update grid */
-  grid_populate(app);
-
-  /* Update counts */
-  app->total_films = db_films_count(app);
-  app->unmatched_films = db_films_count_unmatched(app);
-
-  window_update_status_bar(app);
-  filter_bar_refresh(app);
+  g_thread_new("films-load", films_load_thread, req);
 }
 
 void window_update_status_bar(ReelApp *app) {
@@ -232,6 +365,38 @@ void window_update_status_bar(ReelApp *app) {
   gtk_statusbar_pop(GTK_STATUSBAR(app->status_bar), 0);
   gtk_statusbar_push(GTK_STATUSBAR(app->status_bar), 0, status);
   g_free(status);
+}
+
+void window_refresh_film(ReelApp *app, gint64 film_id) {
+  if (!app)
+    return;
+
+  Film *updated = db_film_get_by_id(app, film_id);
+  if (!updated)
+    return;
+
+  gboolean replaced = FALSE;
+  for (GList *l = app->films; l != NULL; l = l->next) {
+    Film *existing = (Film *)l->data;
+    if (existing && existing->id == film_id) {
+      film_free(existing);
+      l->data = updated;
+      replaced = TRUE;
+      break;
+    }
+  }
+
+  if (replaced) {
+    grid_update_film(app, updated);
+  } else {
+    /* Film not in current view (filtered out); just drop it. */
+    film_free(updated);
+  }
+
+  if (app->genres_dirty) {
+    filter_bar_refresh(app);
+    app->genres_dirty = FALSE;
+  }
 }
 
 static void on_scan_clicked(GtkButton *button, gpointer user_data) {

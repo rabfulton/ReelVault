@@ -23,6 +23,92 @@ static void on_search_clicked(GtkButton *button, gpointer user_data);
 static void on_apply_clicked(GtkButton *button, gpointer user_data);
 static void context_free(MatchDialogContext *ctx);
 
+typedef struct {
+  ReelApp *app;
+  gint64 film_id;
+  gint tmdb_id;
+  gboolean success;
+  GWeakRef dialog_ref;
+  GWeakRef busy_ref;
+  GWeakRef apply_button_ref;
+} ApplyMatchTask;
+
+static gboolean apply_match_done_idle(gpointer data) {
+  ApplyMatchTask *task = (ApplyMatchTask *)data;
+
+  GtkWidget *busy = g_weak_ref_get(&task->busy_ref);
+  if (busy) {
+    gtk_widget_destroy(busy);
+    g_object_unref(busy);
+  }
+
+  GtkWidget *apply_btn = g_weak_ref_get(&task->apply_button_ref);
+  if (apply_btn) {
+    gtk_widget_set_sensitive(apply_btn, TRUE);
+    g_object_unref(apply_btn);
+  }
+
+  GtkWidget *dialog = g_weak_ref_get(&task->dialog_ref);
+  if (task->success) {
+    window_refresh_film(task->app, task->film_id);
+    if (dialog) {
+      gtk_dialog_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
+    }
+  } else {
+    if (dialog) {
+      GtkWidget *err = gtk_message_dialog_new(
+          GTK_WINDOW(dialog), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+          "Failed to fetch film details from TMDB.");
+      window_apply_theme(task->app, err);
+      gtk_dialog_run(GTK_DIALOG(err));
+      gtk_widget_destroy(err);
+    }
+  }
+
+  if (dialog)
+    g_object_unref(dialog);
+
+  g_weak_ref_clear(&task->dialog_ref);
+  g_weak_ref_clear(&task->busy_ref);
+  g_weak_ref_clear(&task->apply_button_ref);
+  g_free(task);
+  return G_SOURCE_REMOVE;
+}
+
+static gpointer apply_match_thread(gpointer data) {
+  ApplyMatchTask *task = (ApplyMatchTask *)data;
+
+  sqlite3 *db = NULL;
+  if (sqlite3_open(task->app->db_path, &db) != SQLITE_OK) {
+    if (db)
+      sqlite3_close(db);
+    task->success = FALSE;
+    g_idle_add(apply_match_done_idle, task);
+    return NULL;
+  }
+  sqlite3_exec(db, "PRAGMA foreign_keys = ON;", NULL, NULL, NULL);
+
+  ReelApp thread_app = *task->app;
+  thread_app.db = db;
+
+  task->success = scraper_fetch_and_update(&thread_app, task->film_id, task->tmdb_id);
+
+  /* Mark as manual after applying a specific selection. */
+  if (task->success) {
+    Film *film = db_film_get_by_id(&thread_app, task->film_id);
+    if (film) {
+      film->match_status = MATCH_STATUS_MANUAL;
+      db_film_update(&thread_app, film);
+      film_free(film);
+    }
+  }
+
+  sqlite3_close(db);
+
+  g_idle_add(apply_match_done_idle, task);
+  return NULL;
+}
+
 /* Callback for search entry activate */
 static void on_search_entry_activate(GtkEntry *entry, gpointer user_data) {
   (void)entry;
@@ -128,7 +214,7 @@ void match_show(ReelApp *app, gint64 film_id) {
   film_free(film);
 
   /* Refresh main window */
-  window_refresh_films(app);
+  window_refresh_film(app, film_id);
 }
 
 static void clear_results(MatchDialogContext *ctx) {
@@ -224,24 +310,25 @@ static void on_apply_clicked(GtkButton *button, gpointer user_data) {
   gint tmdb_id =
       GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row_box), "tmdb_id"));
 
-  /* Fetch and update */
-  if (scraper_fetch_and_update(ctx->app, ctx->film_id, tmdb_id)) {
-    /* Update match status to manual */
-    Film *film = db_film_get_by_id(ctx->app, ctx->film_id);
-    if (film) {
-      film->match_status = MATCH_STATUS_MANUAL;
-      db_film_update(ctx->app, film);
-      film_free(film);
-    }
+  /* Fetch and update on a worker thread to keep UI responsive */
+  ApplyMatchTask *task = g_new0(ApplyMatchTask, 1);
+  task->app = ctx->app;
+  task->film_id = ctx->film_id;
+  task->tmdb_id = tmdb_id;
 
-    gtk_dialog_response(GTK_DIALOG(ctx->dialog), GTK_RESPONSE_ACCEPT);
-  } else {
-    GtkWidget *dialog = gtk_message_dialog_new(
-        GTK_WINDOW(ctx->dialog), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR,
-        GTK_BUTTONS_OK, "Failed to fetch film details from TMDB.");
-    gtk_dialog_run(GTK_DIALOG(dialog));
-    gtk_widget_destroy(dialog);
-  }
+  GtkWidget *busy_dialog = gtk_message_dialog_new(
+      GTK_WINDOW(ctx->dialog), GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_NONE,
+      "Fetching details from TMDB...");
+  window_apply_theme(ctx->app, busy_dialog);
+  gtk_widget_show(busy_dialog);
+
+  g_weak_ref_init(&task->dialog_ref, ctx->dialog);
+  g_weak_ref_init(&task->busy_ref, busy_dialog);
+  g_weak_ref_init(&task->apply_button_ref, GTK_WIDGET(button));
+
+  gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
+
+  g_thread_new("apply-match", apply_match_thread, task);
 }
 
 static void context_free(MatchDialogContext *ctx) {

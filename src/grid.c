@@ -10,6 +10,65 @@
 /* Placeholder poster path */
 static const char *PLACEHOLDER_ICON = "video-x-generic";
 
+typedef struct {
+  gchar *path;
+  gint width;
+  gint height;
+  GWeakRef image_ref;
+  GdkPixbuf *pixbuf;
+} PosterLoadTask;
+
+static gchar *grid_poster_path_for_grid(const gchar *poster_path) {
+  if (!poster_path)
+    return NULL;
+
+  /* Prefer cached thumbnail: /path/123_thumb.jpg for /path/123.jpg */
+  const gchar *dot = strrchr(poster_path, '.');
+  if (!dot)
+    return g_strdup(poster_path);
+
+  gchar *thumb =
+      g_strdup_printf("%.*s_thumb%s", (int)(dot - poster_path), poster_path, dot);
+  if (g_file_test(thumb, G_FILE_TEST_EXISTS)) {
+    return thumb;
+  }
+
+  g_free(thumb);
+  return g_strdup(poster_path);
+}
+
+static gboolean poster_apply_idle(gpointer data) {
+  PosterLoadTask *task = (PosterLoadTask *)data;
+  GtkWidget *image = g_weak_ref_get(&task->image_ref);
+  if (image) {
+    if (task->pixbuf) {
+      gtk_image_set_from_pixbuf(GTK_IMAGE(image), task->pixbuf);
+    }
+    g_object_unref(image);
+  }
+  if (task->pixbuf)
+    g_object_unref(task->pixbuf);
+  g_weak_ref_clear(&task->image_ref);
+  g_free(task->path);
+  g_free(task);
+  return G_SOURCE_REMOVE;
+}
+
+static void poster_load_worker(gpointer data, gpointer user_data) {
+  (void)user_data;
+  PosterLoadTask *task = (PosterLoadTask *)data;
+
+  GError *error = NULL;
+  task->pixbuf =
+      gdk_pixbuf_new_from_file_at_scale(task->path, task->width, task->height,
+                                        TRUE, &error);
+  if (!task->pixbuf && error) {
+    g_error_free(error);
+  }
+
+  g_idle_add(poster_apply_idle, task);
+}
+
 /* Get DPI-scaled dimensions */
 static gint get_scaled_width(ReelApp *app) {
   gdouble scale = (app->scale_factor > 0) ? app->scale_factor : 1.0;
@@ -47,35 +106,31 @@ static GtkWidget *create_poster_widget(ReelApp *app, Film *film) {
   gtk_box_pack_start(GTK_BOX(box), overlay, FALSE, FALSE, 0);
 
   /* Poster image */
-  GtkWidget *image;
-  if (film->poster_path && g_file_test(film->poster_path, G_FILE_TEST_EXISTS)) {
-    /* Load thumbnail from cache */
-    GError *error = NULL;
-    GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(
-        film->poster_path, poster_width, poster_height, TRUE, &error);
-
-    if (pixbuf) {
-      image = gtk_image_new_from_pixbuf(pixbuf);
-      g_object_unref(pixbuf);
-    } else {
-      g_print("Failed to load poster %s: %s\n", film->poster_path,
-              error->message);
-      g_error_free(error);
-      image =
-          gtk_image_new_from_icon_name(PLACEHOLDER_ICON, GTK_ICON_SIZE_DIALOG);
-      gtk_image_set_pixel_size(GTK_IMAGE(image), poster_height);
-    }
-  } else {
-    /* Use placeholder */
-    image =
-        gtk_image_new_from_icon_name(PLACEHOLDER_ICON, GTK_ICON_SIZE_DIALOG);
-    gtk_image_set_pixel_size(GTK_IMAGE(image), poster_height);
-  }
+  GtkWidget *image =
+      gtk_image_new_from_icon_name(PLACEHOLDER_ICON, GTK_ICON_SIZE_DIALOG);
+  gtk_image_set_pixel_size(GTK_IMAGE(image), poster_height);
 
   gtk_widget_set_size_request(image, poster_width, poster_height);
   gtk_widget_set_halign(image, GTK_ALIGN_CENTER);
   gtk_widget_set_valign(image, GTK_ALIGN_START);
   gtk_container_add(GTK_CONTAINER(overlay), image);
+
+  if (film->poster_path && g_file_test(film->poster_path, G_FILE_TEST_EXISTS)) {
+    gchar *poster_path = grid_poster_path_for_grid(film->poster_path);
+    if (poster_path) {
+      if (!app->thread_pool) {
+        app->thread_pool = g_thread_pool_new(poster_load_worker, NULL, 4, FALSE,
+                                             NULL);
+      }
+
+      PosterLoadTask *task = g_new0(PosterLoadTask, 1);
+      task->path = poster_path;
+      task->width = poster_width;
+      task->height = poster_height;
+      g_weak_ref_init(&task->image_ref, image);
+      g_thread_pool_push(app->thread_pool, task, NULL);
+    }
+  }
 
   /* Unmatched badge */
   if (film->match_status == MATCH_STATUS_UNMATCHED) {
@@ -188,6 +243,15 @@ GtkWidget *grid_create(ReelApp *app) {
 }
 
 void grid_clear(ReelApp *app) {
+  if (app->grid_idle_source) {
+    g_source_remove(app->grid_idle_source);
+    app->grid_idle_source = 0;
+  }
+  if (app->grid_pending) {
+    g_list_free(app->grid_pending);
+    app->grid_pending = NULL;
+  }
+
   GList *children = gtk_container_get_children(GTK_CONTAINER(app->grid_view));
   for (GList *l = children; l != NULL; l = l->next) {
     gtk_widget_destroy(GTK_WIDGET(l->data));
@@ -195,16 +259,68 @@ void grid_clear(ReelApp *app) {
   g_list_free(children);
 }
 
-void grid_populate(ReelApp *app) {
-  /* Clear existing */
-  grid_clear(app);
+static gboolean grid_append_idle(gpointer data) {
+  ReelApp *app = (ReelApp *)data;
 
-  /* Add poster for each film */
-  for (GList *l = app->films; l != NULL; l = l->next) {
-    Film *film = (Film *)l->data;
+  const int chunk = 40;
+  int inserted = 0;
+  while (app->grid_pending && inserted < chunk) {
+    Film *film = (Film *)app->grid_pending->data;
     GtkWidget *poster = create_poster_widget(app, film);
     gtk_flow_box_insert(GTK_FLOW_BOX(app->grid_view), poster, -1);
+
+    GList *link = app->grid_pending;
+    app->grid_pending = app->grid_pending->next;
+    g_list_free_1(link);
+    inserted++;
   }
 
-  gtk_widget_show_all(app->grid_view);
+  if (!app->grid_pending) {
+    app->grid_idle_source = 0;
+    gtk_widget_show_all(app->grid_view);
+    return G_SOURCE_REMOVE;
+  }
+
+  return G_SOURCE_CONTINUE;
+}
+
+void grid_append_films(ReelApp *app, GList *films) {
+  if (!films)
+    return;
+
+  app->grid_pending = g_list_concat(app->grid_pending, g_list_copy(films));
+  if (!app->grid_idle_source) {
+    app->grid_idle_source = g_idle_add(grid_append_idle, app);
+  }
+}
+
+void grid_update_film(ReelApp *app, const Film *film) {
+  if (!app || !app->grid_view || !film)
+    return;
+
+  GList *children = gtk_container_get_children(GTK_CONTAINER(app->grid_view));
+  for (GList *l = children; l != NULL; l = l->next) {
+    GtkFlowBoxChild *child = GTK_FLOW_BOX_CHILD(l->data);
+    GtkWidget *box = gtk_bin_get_child(GTK_BIN(child));
+    if (!box)
+      continue;
+
+    gint64 id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(box), "film_id"));
+    if (id != film->id)
+      continue;
+
+    int index = gtk_flow_box_child_get_index(child);
+    gtk_widget_destroy(GTK_WIDGET(child));
+
+    GtkWidget *new_box = create_poster_widget(app, (Film *)film);
+    gtk_flow_box_insert(GTK_FLOW_BOX(app->grid_view), new_box, index);
+    gtk_widget_show_all(app->grid_view);
+    break;
+  }
+  g_list_free(children);
+}
+
+void grid_populate(ReelApp *app) {
+  grid_clear(app);
+  grid_append_films(app, app->films);
 }

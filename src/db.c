@@ -87,6 +87,8 @@ static const char *SCHEMA_SQL =
     "CREATE INDEX IF NOT EXISTS idx_films_title ON films(title);"
     "CREATE INDEX IF NOT EXISTS idx_films_match_status ON films(match_status);"
     "CREATE INDEX IF NOT EXISTS idx_films_tmdb_id ON films(tmdb_id);"
+    "CREATE INDEX IF NOT EXISTS idx_films_rating ON films(rating);"
+    "CREATE INDEX IF NOT EXISTS idx_films_added_date ON films(added_date);"
     "CREATE INDEX IF NOT EXISTS idx_film_files_film_id ON film_files(film_id);";
 
 gboolean db_init(ReelApp *app) {
@@ -121,6 +123,13 @@ gboolean db_init(ReelApp *app) {
                NULL, NULL, NULL);
   sqlite3_exec(app->db,
                "ALTER TABLE films ADD COLUMN season_number INTEGER DEFAULT 0",
+               NULL, NULL, NULL);
+
+  /* Additional indexes (ignore errors if already exist) */
+  sqlite3_exec(app->db, "CREATE INDEX IF NOT EXISTS idx_films_rating ON films(rating);",
+               NULL, NULL, NULL);
+  sqlite3_exec(app->db,
+               "CREATE INDEX IF NOT EXISTS idx_films_added_date ON films(added_date);",
                NULL, NULL, NULL);
 
   g_print("Database initialized: %s\n", app->db_path);
@@ -247,6 +256,132 @@ static Film *film_from_row(sqlite3_stmt *stmt) {
   }
 
   return film;
+}
+
+sqlite3 *db_open_readonly(const gchar *db_path) {
+  sqlite3 *db = NULL;
+  if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+    if (db)
+      sqlite3_close(db);
+    return NULL;
+  }
+  return db;
+}
+
+void db_close_handle(sqlite3 *db) {
+  if (db)
+    sqlite3_close(db);
+}
+
+static GString *build_films_query(const FilterState *filter, gboolean paged,
+                                  gint limit, gint offset) {
+  GString *sql = g_string_new("SELECT f.* FROM films f");
+  gboolean has_where = FALSE;
+
+  if (filter && filter->genre && strlen(filter->genre) > 0) {
+    g_string_append(sql, " JOIN film_genres fg ON f.id = fg.film_id"
+                         " JOIN genres g ON fg.genre_id = g.id");
+    g_string_append_printf(sql, " WHERE g.name = '%s'", filter->genre);
+    has_where = TRUE;
+  }
+
+  if (filter && filter->year_from > 0) {
+    g_string_append_printf(sql, " %s f.year >= %d", has_where ? "AND" : "WHERE",
+                           filter->year_from);
+    has_where = TRUE;
+  }
+
+  if (filter && filter->year_to > 0) {
+    g_string_append_printf(sql, " %s f.year <= %d", has_where ? "AND" : "WHERE",
+                           filter->year_to);
+    has_where = TRUE;
+  }
+
+  if (filter && filter->search_text && strlen(filter->search_text) > 0) {
+    g_string_append_printf(sql, " %s f.title LIKE '%%%s%%'",
+                           has_where ? "AND" : "WHERE", filter->search_text);
+    has_where = TRUE;
+  }
+
+  if (filter && filter->actor && strlen(filter->actor) > 0) {
+    if (!has_where) {
+      g_string_append(sql, " WHERE");
+    } else {
+      g_string_append(sql, " AND");
+    }
+    g_string_append(sql, " f.id IN (SELECT fa.film_id FROM film_actors fa"
+                         " JOIN actors a ON fa.actor_id = a.id"
+                         " WHERE a.name LIKE '%");
+    g_string_append(sql, filter->actor);
+    g_string_append(sql, "%')");
+    has_where = TRUE;
+  }
+
+  if (filter && filter->sort_by) {
+    if (g_strcmp0(filter->sort_by, "year") == 0) {
+      g_string_append(sql, " ORDER BY f.year");
+    } else if (g_strcmp0(filter->sort_by, "rating") == 0) {
+      g_string_append(sql, " ORDER BY f.rating");
+    } else if (g_strcmp0(filter->sort_by, "added") == 0) {
+      g_string_append(sql, " ORDER BY f.added_date");
+    } else {
+      g_string_append(sql, " ORDER BY f.title COLLATE NOCASE");
+    }
+    g_string_append(sql, (filter->sort_ascending ? " ASC" : " DESC"));
+  } else {
+    g_string_append(sql, " ORDER BY f.title COLLATE NOCASE ASC");
+  }
+
+  if (paged && limit > 0) {
+    g_string_append_printf(sql, " LIMIT %d OFFSET %d", limit, offset);
+  }
+
+  return sql;
+}
+
+GList *db_films_get_page_db(sqlite3 *db, const FilterState *filter, gint limit,
+                            gint offset) {
+  GString *sql = build_films_query(filter, TRUE, limit, offset);
+
+  sqlite3_stmt *stmt;
+  int rc = sqlite3_prepare_v2(db, sql->str, -1, &stmt, NULL);
+  g_string_free(sql, TRUE);
+  if (rc != SQLITE_OK)
+    return NULL;
+
+  GList *films = NULL;
+  while (sqlite3_step(stmt) == SQLITE_ROW) {
+    films = g_list_append(films, film_from_row(stmt));
+  }
+
+  sqlite3_finalize(stmt);
+  return films;
+}
+
+gint db_films_count_db(sqlite3 *db) {
+  const char *sql = "SELECT COUNT(*) FROM films";
+  sqlite3_stmt *stmt;
+  int count = 0;
+  if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+      count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+  }
+  return count;
+}
+
+gint db_films_count_unmatched_db(sqlite3 *db) {
+  const char *sql = "SELECT COUNT(*) FROM films WHERE match_status = 0";
+  sqlite3_stmt *stmt;
+  int count = 0;
+  if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+      count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+  }
+  return count;
 }
 
 static FilmFile *film_file_from_row(sqlite3_stmt *stmt) {
