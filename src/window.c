@@ -257,12 +257,14 @@ void window_create(ReelApp *app) {
   gtk_window_set_title(GTK_WINDOW(app->window), APP_NAME);
   if (app->window_geometry_valid && app->window_width > 0 &&
       app->window_height > 0) {
-    gtk_window_set_default_size(GTK_WINDOW(app->window), app->window_width,
-                                app->window_height);
+    /* Use resize (not default_size) to avoid size drift from mismatched
+       decoration/client-area measurements across sessions. */
+    gtk_window_resize(GTK_WINDOW(app->window), app->window_width,
+                      app->window_height);
   } else {
     gtk_window_set_default_size(GTK_WINDOW(app->window), 1200, 800);
+    gtk_window_set_position(GTK_WINDOW(app->window), GTK_WIN_POS_CENTER);
   }
-  gtk_window_set_position(GTK_WINDOW(app->window), GTK_WIN_POS_CENTER);
 
   if (app->window_geometry_valid && !app->window_maximized) {
     gtk_window_move(GTK_WINDOW(app->window), app->window_x, app->window_y);
@@ -340,21 +342,30 @@ void window_create(ReelApp *app) {
 static gboolean on_main_window_configure(GtkWidget *widget,
                                         GdkEventConfigure *event,
                                         gpointer user_data) {
-  (void)widget;
   ReelApp *app = (ReelApp *)user_data;
   if (!app || !event)
+    return GDK_EVENT_PROPAGATE;
+
+  if (!GTK_IS_WINDOW(widget))
     return GDK_EVENT_PROPAGATE;
 
   if (app->window_maximized)
     return GDK_EVENT_PROPAGATE;
 
-  if (event->width > 0 && event->height > 0) {
-    app->window_width = event->width;
-    app->window_height = event->height;
+  /* Use GtkWindow getters rather than raw configure-event values to avoid
+     decoration/scale-factor drift (which can cause the window to grow on each
+     launch). */
+  gint w = 0, h = 0;
+  gtk_window_get_size(GTK_WINDOW(widget), &w, &h);
+
+  if (w > 0 && h > 0) {
+    app->window_width = w;
+    app->window_height = h;
     app->window_geometry_valid = TRUE;
   }
-
-  /* On some backends, x/y may be 0 or unreliable; store anyway. */
+  /* For position, prefer the configure-event coordinates; using
+     gtk_window_get_position() can introduce a constant decoration offset that
+     accumulates across restarts on some WMs. */
   app->window_x = event->x;
   app->window_y = event->y;
 
