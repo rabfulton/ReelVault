@@ -179,7 +179,7 @@ void detail_show(ReelApp *app, gint64 film_id) {
       GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, NULL, NULL);
   window_apply_theme(app, dialog);
 
-  gtk_window_set_default_size(GTK_WINDOW(dialog), 700, 500);
+  gtk_window_set_default_size(GTK_WINDOW(dialog), 900, 650);
 
   /* Use a header bar to match the main window style. */
   GtkWidget *header = gtk_header_bar_new();
@@ -201,19 +201,19 @@ void detail_show(ReelApp *app, gint64 film_id) {
   GtkWidget *poster_image;
   if (film->poster_path && g_file_test(film->poster_path, G_FILE_TEST_EXISTS)) {
     GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(film->poster_path,
-                                                          250, 375, TRUE, NULL);
+                                                          375, 562, TRUE, NULL);
     if (pixbuf) {
       poster_image = gtk_image_new_from_pixbuf(pixbuf);
       g_object_unref(pixbuf);
     } else {
       poster_image =
           gtk_image_new_from_icon_name("video-x-generic", GTK_ICON_SIZE_DIALOG);
-      gtk_image_set_pixel_size(GTK_IMAGE(poster_image), 200);
+      gtk_image_set_pixel_size(GTK_IMAGE(poster_image), 300);
     }
   } else {
     poster_image =
         gtk_image_new_from_icon_name("video-x-generic", GTK_ICON_SIZE_DIALOG);
-    gtk_image_set_pixel_size(GTK_IMAGE(poster_image), 200);
+    gtk_image_set_pixel_size(GTK_IMAGE(poster_image), 300);
   }
   gtk_box_pack_start(GTK_BOX(poster_box), poster_image, FALSE, FALSE, 0);
 
@@ -416,7 +416,9 @@ void detail_show(ReelApp *app, gint64 film_id) {
   gtk_box_pack_start(GTK_BOX(primary_row), file_label, TRUE, TRUE, 0);
 
   if (film->media_type == MEDIA_FILM) {
-    GtkWidget *play_primary = gtk_button_new_with_label("Play");
+    GtkWidget *play_primary = gtk_button_new_from_icon_name(
+        "media-playback-start-symbolic", GTK_ICON_SIZE_BUTTON);
+    gtk_widget_set_tooltip_text(play_primary, "Play");
     g_object_set_data_full(G_OBJECT(play_primary), "file_path",
                            g_strdup(film->file_path), g_free);
     g_object_set_data(G_OBJECT(play_primary), "app", app);
@@ -442,7 +444,9 @@ void detail_show(ReelApp *app, gint64 film_id) {
       gtk_label_set_xalign(GTK_LABEL(lbl), 0);
       gtk_box_pack_start(GTK_BOX(row), lbl, TRUE, TRUE, 0);
 
-      GtkWidget *play_btn = gtk_button_new_with_label("Play");
+      GtkWidget *play_btn = gtk_button_new_from_icon_name(
+          "media-playback-start-symbolic", GTK_ICON_SIZE_BUTTON);
+      gtk_widget_set_tooltip_text(play_btn, "Play");
       g_object_set_data_full(G_OBJECT(play_btn), "file_path",
                              g_strdup(ff->file_path), g_free);
       g_object_set_data(G_OBJECT(play_btn), "app", app);
