@@ -367,20 +367,30 @@ static gboolean fetch_tv_season_details(ReelApp *app, Film *film,
       gchar *url = g_strdup_printf("%s/w500%s", TMDB_IMAGE_BASE, poster_path);
       gchar *dest = g_build_filename(
           app->poster_cache_path, g_strdup_printf("%ld.jpg", film->id), NULL);
-      if (download_file(url, dest)) {
+      gboolean ok = download_file(url, dest);
+      g_free(url);
+
+      if (ok) {
         g_free(film->poster_path);
         film->poster_path = dest; /* Takes ownership */
+        gchar *thumb = g_build_filename(
+            app->poster_cache_path, g_strdup_printf("%ld_thumb.jpg", film->id),
+            NULL);
+        /* Always refresh thumb to avoid stale/wrong grid posters. */
+        GError *thumb_err = NULL;
+        GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(
+            dest, POSTER_THUMB_WIDTH, POSTER_THUMB_HEIGHT, TRUE, &thumb_err);
+        if (pixbuf) {
+          gdk_pixbuf_save(pixbuf, thumb, "jpeg", &thumb_err, "quality", "85",
+                          NULL);
+          g_object_unref(pixbuf);
+        }
+        if (thumb_err)
+          g_error_free(thumb_err);
+        g_free(thumb);
       } else {
-        g_free(url);
         g_free(dest);
       }
-      /* download_file consumes nothing, free strings manually */
-      if (film->poster_path != dest)
-        g_free(dest);
-      // Wait, logic above is messy. let's fix.
-      // download_file returns boolean.
-      // clean up done inside if block if needed.
-      // simplified:
     }
   }
 
@@ -609,17 +619,16 @@ gboolean scraper_download_poster(ReelApp *app, const gchar *poster_path,
         g_build_filename(app->poster_cache_path,
                          g_strdup_printf("%d_thumb.jpg", tmdb_id), NULL);
 
-    if (!g_file_test(thumb, G_FILE_TEST_EXISTS)) {
-      GError *error = NULL;
-      GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(
-          dest, POSTER_THUMB_WIDTH, POSTER_THUMB_HEIGHT, TRUE, &error);
-      if (pixbuf) {
-        gdk_pixbuf_save(pixbuf, thumb, "jpeg", &error, "quality", "85", NULL);
-        g_object_unref(pixbuf);
-      }
-      if (error)
-        g_error_free(error);
+    /* Always refresh thumb so grid never shows a stale poster. */
+    GError *error = NULL;
+    GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(
+        dest, POSTER_THUMB_WIDTH, POSTER_THUMB_HEIGHT, TRUE, &error);
+    if (pixbuf) {
+      gdk_pixbuf_save(pixbuf, thumb, "jpeg", &error, "quality", "85", NULL);
+      g_object_unref(pixbuf);
     }
+    if (error)
+      g_error_free(error);
 
     g_free(thumb);
   }

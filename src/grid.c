@@ -7,6 +7,7 @@
 #include "detail.h"
 #include <stdarg.h>
 #include <string.h>
+#include <glib/gstdio.h>
 
 /* Placeholder poster path */
 static const char *PLACEHOLDER_ICON = "video-x-generic";
@@ -47,6 +48,21 @@ typedef struct {
   GdkPixbuf *pixbuf;
 } PosterLoadTask;
 
+static gboolean thumb_is_fresh(const gchar *original_path,
+                               const gchar *thumb_path) {
+  if (!original_path || !thumb_path)
+    return FALSE;
+
+  GStatBuf st_original;
+  GStatBuf st_thumb;
+  if (g_stat(original_path, &st_original) != 0)
+    return FALSE;
+  if (g_stat(thumb_path, &st_thumb) != 0)
+    return FALSE;
+
+  return st_thumb.st_mtime >= st_original.st_mtime;
+}
+
 static gchar *grid_poster_path_for_grid(const gchar *poster_path) {
   if (!poster_path)
     return NULL;
@@ -58,7 +74,7 @@ static gchar *grid_poster_path_for_grid(const gchar *poster_path) {
 
   gchar *thumb =
       g_strdup_printf("%.*s_thumb%s", (int)(dot - poster_path), poster_path, dot);
-  if (g_file_test(thumb, G_FILE_TEST_EXISTS)) {
+  if (g_file_test(thumb, G_FILE_TEST_EXISTS) && thumb_is_fresh(poster_path, thumb)) {
     return thumb;
   }
 
@@ -104,10 +120,11 @@ static void poster_load_worker(gpointer data, gpointer user_data) {
   }
 
   /* Best effort: if we were asked to load the original and the thumb doesn't
-     exist yet (older installs), generate it once in the background. */
+     exist yet (older installs) or is stale, generate it once in the background. */
   gchar *thumb_path = grid_thumb_path_for_original(task->path);
   if (thumb_path && !g_str_has_suffix(task->path, "_thumb.jpg") &&
-      !g_file_test(thumb_path, G_FILE_TEST_EXISTS)) {
+      (!g_file_test(thumb_path, G_FILE_TEST_EXISTS) ||
+       !thumb_is_fresh(task->path, thumb_path))) {
     GError *thumb_err = NULL;
     GdkPixbuf *thumb = gdk_pixbuf_new_from_file_at_scale(
         task->path, POSTER_THUMB_WIDTH, POSTER_THUMB_HEIGHT, TRUE, &thumb_err);
