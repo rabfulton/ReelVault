@@ -5,10 +5,39 @@
 
 #include "grid.h"
 #include "detail.h"
+#include <stdarg.h>
 #include <string.h>
 
 /* Placeholder poster path */
 static const char *PLACEHOLDER_ICON = "video-x-generic";
+
+static gboolean startup_debug_enabled(void) {
+  static gint inited = 0;
+  static gboolean enabled = FALSE;
+  if (!inited) {
+    const gchar *env = g_getenv("REELVAULT_STARTUP_DEBUG");
+    enabled = (env && *env && g_strcmp0(env, "0") != 0);
+    inited = 1;
+  }
+  return enabled;
+}
+
+static void startup_log(const char *fmt, ...) {
+  if (!startup_debug_enabled())
+    return;
+  static gint64 t0 = 0;
+  if (!t0)
+    t0 = g_get_monotonic_time();
+  gint64 ms = (g_get_monotonic_time() - t0) / 1000;
+
+  va_list ap;
+  va_start(ap, fmt);
+  gchar *msg = g_strdup_vprintf(fmt, ap);
+  va_end(ap);
+
+  g_printerr("[grid +%ldms] %s\n", (long)ms, msg ? msg : "");
+  g_free(msg);
+}
 
 typedef struct {
   gchar *path;
@@ -37,6 +66,16 @@ static gchar *grid_poster_path_for_grid(const gchar *poster_path) {
   return g_strdup(poster_path);
 }
 
+static gchar *grid_thumb_path_for_original(const gchar *poster_path) {
+  if (!poster_path)
+    return NULL;
+  const gchar *dot = strrchr(poster_path, '.');
+  if (!dot)
+    return NULL;
+  return g_strdup_printf("%.*s_thumb%s", (int)(dot - poster_path), poster_path,
+                         dot);
+}
+
 static gboolean poster_apply_idle(gpointer data) {
   PosterLoadTask *task = (PosterLoadTask *)data;
   GtkWidget *image = g_weak_ref_get(&task->image_ref);
@@ -58,12 +97,40 @@ static void poster_load_worker(gpointer data, gpointer user_data) {
   (void)user_data;
   PosterLoadTask *task = (PosterLoadTask *)data;
 
+  static gint log_n = 0;
+  if (startup_debug_enabled() && log_n < 15) {
+    startup_log("poster_load_worker: start %s", task->path);
+    log_n++;
+  }
+
+  /* Best effort: if we were asked to load the original and the thumb doesn't
+     exist yet (older installs), generate it once in the background. */
+  gchar *thumb_path = grid_thumb_path_for_original(task->path);
+  if (thumb_path && !g_str_has_suffix(task->path, "_thumb.jpg") &&
+      !g_file_test(thumb_path, G_FILE_TEST_EXISTS)) {
+    GError *thumb_err = NULL;
+    GdkPixbuf *thumb = gdk_pixbuf_new_from_file_at_scale(
+        task->path, POSTER_THUMB_WIDTH, POSTER_THUMB_HEIGHT, TRUE, &thumb_err);
+    if (thumb) {
+      gdk_pixbuf_save(thumb, thumb_path, "jpeg", &thumb_err, "quality", "85",
+                      NULL);
+      g_object_unref(thumb);
+    }
+    if (thumb_err)
+      g_error_free(thumb_err);
+  }
+  g_free(thumb_path);
+
   GError *error = NULL;
   task->pixbuf =
       gdk_pixbuf_new_from_file_at_scale(task->path, task->width, task->height,
                                         TRUE, &error);
   if (!task->pixbuf && error) {
     g_error_free(error);
+  }
+
+  if (startup_debug_enabled() && log_n < 15) {
+    startup_log("poster_load_worker: loaded pixbuf=%s", task->pixbuf ? "yes" : "no");
   }
 
   g_idle_add(poster_apply_idle, task);
@@ -267,7 +334,10 @@ static gboolean grid_append_idle(gpointer data) {
   while (app->grid_pending && inserted < chunk) {
     Film *film = (Film *)app->grid_pending->data;
     GtkWidget *poster = create_poster_widget(app, film);
-    gtk_flow_box_insert(GTK_FLOW_BOX(app->grid_view), poster, -1);
+    GtkWidget *child = gtk_flow_box_child_new();
+    gtk_container_add(GTK_CONTAINER(child), poster);
+    gtk_widget_show_all(child);
+    gtk_flow_box_insert(GTK_FLOW_BOX(app->grid_view), child, -1);
 
     GList *link = app->grid_pending;
     app->grid_pending = app->grid_pending->next;
@@ -275,9 +345,13 @@ static gboolean grid_append_idle(gpointer data) {
     inserted++;
   }
 
+  if (startup_debug_enabled()) {
+    startup_log("grid_append_idle: inserted=%d pending=%s", inserted,
+                app->grid_pending ? "yes" : "no");
+  }
+
   if (!app->grid_pending) {
     app->grid_idle_source = 0;
-    gtk_widget_show_all(app->grid_view);
     return G_SOURCE_REMOVE;
   }
 
@@ -313,8 +387,10 @@ void grid_update_film(ReelApp *app, const Film *film) {
     gtk_widget_destroy(GTK_WIDGET(child));
 
     GtkWidget *new_box = create_poster_widget(app, (Film *)film);
-    gtk_flow_box_insert(GTK_FLOW_BOX(app->grid_view), new_box, index);
-    gtk_widget_show_all(app->grid_view);
+    GtkWidget *new_child = gtk_flow_box_child_new();
+    gtk_container_add(GTK_CONTAINER(new_child), new_box);
+    gtk_widget_show_all(new_child);
+    gtk_flow_box_insert(GTK_FLOW_BOX(app->grid_view), new_child, index);
     break;
   }
   g_list_free(children);

@@ -10,6 +10,7 @@
 #include "grid.h"
 #include "scanner.h"
 #include "scraper.h"
+#include <stdarg.h>
 #include <string.h>
 
 /* Forward declarations */
@@ -18,11 +19,40 @@ static void on_scan_clicked(GtkButton *button, gpointer user_data);
 static void on_settings_clicked(GtkButton *button, gpointer user_data);
 static void on_unmatched_clicked(GtkButton *button, gpointer user_data);
 
+static gboolean startup_debug_enabled(void) {
+  static gint inited = 0;
+  static gboolean enabled = FALSE;
+  if (!inited) {
+    const gchar *env = g_getenv("REELVAULT_STARTUP_DEBUG");
+    enabled = (env && *env && g_strcmp0(env, "0") != 0);
+    inited = 1;
+  }
+  return enabled;
+}
+
+static void startup_log(const char *fmt, ...) {
+  if (!startup_debug_enabled())
+    return;
+  static gint64 t0 = 0;
+  if (!t0)
+    t0 = g_get_monotonic_time();
+  gint64 ms = (g_get_monotonic_time() - t0) / 1000;
+
+  va_list ap;
+  va_start(ap, fmt);
+  gchar *msg = g_strdup_vprintf(fmt, ap);
+  va_end(ap);
+
+  g_printerr("[startup +%ldms] %s\n", (long)ms, msg ? msg : "");
+  g_free(msg);
+}
+
 typedef struct {
   ReelApp *app;
   guint gen;
   gchar *db_path;
   FilterState filter;
+  gint offset_start;
 } FilmsLoadRequest;
 
 typedef struct {
@@ -132,8 +162,10 @@ static gboolean films_done_idle(gpointer data) {
 
 static gpointer films_load_thread(gpointer data) {
   FilmsLoadRequest *req = (FilmsLoadRequest *)data;
+  startup_log("films_load_thread: open db (offset_start=%d)", req->offset_start);
   sqlite3 *db = db_open_readonly(req->db_path);
   if (!db) {
+    startup_log("films_load_thread: failed to open db");
     g_idle_add(films_done_idle, req);
     return NULL;
   }
@@ -143,16 +175,22 @@ static gpointer films_load_thread(gpointer data) {
   counts->gen = req->gen;
   counts->total = db_films_count_db(db);
   counts->unmatched = db_films_count_unmatched_db(db);
+  startup_log("films_load_thread: counts total=%d unmatched=%d", counts->total,
+              counts->unmatched);
   g_idle_add(films_counts_idle, counts);
 
   const int page_size = 250;
-  for (int offset = 0;; offset += page_size) {
+  for (int offset = req->offset_start;; offset += page_size) {
     if (req->gen != req->app->films_refresh_gen)
       break;
 
+    gint64 t_page0 = g_get_monotonic_time();
     GList *page = db_films_get_page_db(db, &req->filter, page_size, offset);
+    gint64 page_ms = (g_get_monotonic_time() - t_page0) / 1000;
     if (!page)
       break;
+    startup_log("films_load_thread: loaded page offset=%d size=%d (%ldms)", offset,
+                g_list_length(page), (long)page_ms);
 
     FilmsPagePayload *p = g_new0(FilmsPagePayload, 1);
     p->app = req->app;
@@ -165,11 +203,13 @@ static gpointer films_load_thread(gpointer data) {
   }
 
   db_close_handle(db);
+  startup_log("films_load_thread: done");
   g_idle_add(films_done_idle, req);
   return NULL;
 }
 
 void window_create(ReelApp *app) {
+  startup_log("window_create: start");
   if (app->system_prefer_dark == FALSE) {
     g_object_get(gtk_settings_get_default(),
                  "gtk-application-prefer-dark-theme", &app->system_prefer_dark,
@@ -247,12 +287,14 @@ void window_create(ReelApp *app) {
   app->status_bar = NULL;
 
   /* Initial load */
+  startup_log("window_create: initial window_refresh_films()");
   window_refresh_films(app);
   window_update_status_bar(app);
   filter_bar_refresh(app);
 
   /* Apply theme CSS */
   apply_theme_css(app);
+  startup_log("window_create: done");
 }
 
 /* Apply comprehensive dark/light theme CSS */
@@ -338,6 +380,7 @@ static void apply_theme_css(ReelApp *app) {
 }
 
 void window_refresh_films(ReelApp *app) {
+  startup_log("window_refresh_films: begin gen=%u", app->films_refresh_gen + 1);
   /* Cancel any existing grid population and clear current UI quickly. */
   app->films_refresh_gen++;
   app->films_loading = TRUE;
@@ -348,12 +391,27 @@ void window_refresh_films(ReelApp *app) {
   }
   grid_clear(app);
 
+  /* Fast first paint: load a small first page synchronously on the UI thread. */
+  const int first_page = 80;
+  gint64 t0 = g_get_monotonic_time();
+  GList *initial = db_films_get_page_db(app->db, &app->filter, first_page, 0);
+  gint64 ms = (g_get_monotonic_time() - t0) / 1000;
+  startup_log("window_refresh_films: initial page size=%d (%ldms)",
+              initial ? g_list_length(initial) : 0, (long)ms);
+  if (initial) {
+    app->films = initial;
+    grid_append_films(app, initial);
+  }
+
   FilmsLoadRequest *req = g_new0(FilmsLoadRequest, 1);
   req->app = app;
   req->gen = app->films_refresh_gen;
   req->db_path = g_strdup(app->db_path);
   filter_state_clone(&req->filter, &app->filter);
+  req->offset_start = first_page;
 
+  startup_log("window_refresh_films: start films_load_thread from offset=%d",
+              req->offset_start);
   g_thread_new("films-load", films_load_thread, req);
 }
 
