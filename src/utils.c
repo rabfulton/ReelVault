@@ -5,7 +5,22 @@
 #include "utils.h"
 #include <ctype.h>
 #include <string.h>
-#include <turbojpeg.h>
+
+/* TurboJPEG header location varies by distro. */
+#if defined(__has_include)
+#  if __has_include(<turbojpeg.h>)
+#    include <turbojpeg.h>
+#    define REELVAULT_HAVE_TURBOJPEG 1
+#  elif __has_include(<turbojpeg/turbojpeg.h>)
+#    include <turbojpeg/turbojpeg.h>
+#    define REELVAULT_HAVE_TURBOJPEG 1
+#  else
+#    define REELVAULT_HAVE_TURBOJPEG 0
+#  endif
+#else
+#  include <turbojpeg.h>
+#  define REELVAULT_HAVE_TURBOJPEG 1
+#endif
 
 /* Quality/release tags to strip from titles */
 static const char *STRIP_TAGS[] = {
@@ -128,6 +143,11 @@ static gboolean utils_path_is_jpeg(const gchar *path) {
 
 static GdkPixbuf *utils_pixbuf_new_from_jpeg_turbo(const gchar *path,
                                                    GError **error) {
+#if !REELVAULT_HAVE_TURBOJPEG
+  (void)path;
+  (void)error;
+  return NULL;
+#else
   if (!path)
     return NULL;
 
@@ -185,6 +205,7 @@ static GdkPixbuf *utils_pixbuf_new_from_jpeg_turbo(const gchar *path,
   return gdk_pixbuf_new_from_data(rgb, GDK_COLORSPACE_RGB, FALSE, 8, width,
                                  height, (int)stride, utils_pixbuf_free_pixels,
                                  NULL);
+#endif
 }
 
 GdkPixbuf *utils_pixbuf_new_from_file_at_scale_safe(const gchar *path, gint width,
