@@ -12,6 +12,7 @@
 #include "scraper.h"
 #include <stdarg.h>
 #include <string.h>
+#include <gdk/gdkkeysyms.h>
 #ifdef __GLIBC__
 #include <malloc.h>
 #endif
@@ -72,6 +73,8 @@ static gboolean on_main_window_configure(GtkWidget *widget,
 static gboolean on_main_window_state(GtkWidget *widget,
                                      GdkEventWindowState *event,
                                      gpointer user_data);
+static gboolean on_main_window_key_press(GtkWidget *widget, GdkEventKey *event,
+                                        gpointer user_data);
 
 static gboolean startup_debug_enabled(void) {
   static gint inited = 0;
@@ -339,6 +342,8 @@ void window_create(ReelApp *app) {
                    G_CALLBACK(on_main_window_configure), app);
   g_signal_connect(app->window, "window-state-event",
                    G_CALLBACK(on_main_window_state), app);
+  g_signal_connect(app->window, "key-press-event",
+                   G_CALLBACK(on_main_window_key_press), app);
 
   /* Main vertical box */
   GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -421,6 +426,22 @@ static gboolean on_main_window_configure(GtkWidget *widget,
      accumulates across restarts on some WMs. */
   app->window_x = event->x;
   app->window_y = event->y;
+
+  return GDK_EVENT_PROPAGATE;
+}
+
+static gboolean on_main_window_key_press(GtkWidget *widget, GdkEventKey *event,
+                                        gpointer user_data) {
+  (void)widget;
+  ReelApp *app = (ReelApp *)user_data;
+  if (!app || !event)
+    return GDK_EVENT_PROPAGATE;
+
+  if ((event->state & GDK_CONTROL_MASK) &&
+      (event->keyval == GDK_KEY_f || event->keyval == GDK_KEY_F)) {
+    filter_bar_focus_search(app);
+    return GDK_EVENT_STOP;
+  }
 
   return GDK_EVENT_PROPAGATE;
 }

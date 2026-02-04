@@ -12,4 +12,7 @@ void filter_bar_refresh(ReelApp *app);
 /* Clear all filters */
 void filter_bar_reset(ReelApp *app);
 
+/* Focus the search entry (for keyboard shortcuts like Ctrl+F). */
+void filter_bar_focus_search(ReelApp *app);
+
 #endif /* REELGTK_FILTER_H */

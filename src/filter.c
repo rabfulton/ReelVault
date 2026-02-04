@@ -192,6 +192,19 @@ void filter_bar_reset(ReelApp *app) {
   window_refresh_films(app);
 }
 
+void filter_bar_focus_search(ReelApp *app) {
+  if (!app || !app->filter_bar)
+    return;
+
+  FilterWidgets *widgets =
+      g_object_get_data(G_OBJECT(app->filter_bar), "widgets");
+  if (!widgets || !widgets->search_entry)
+    return;
+
+  gtk_widget_grab_focus(widgets->search_entry);
+  gtk_editable_select_region(GTK_EDITABLE(widgets->search_entry), 0, -1);
+}
+
 static void update_filter_state(ReelApp *app) {
   FilterWidgets *widgets =
       g_object_get_data(G_OBJECT(app->filter_bar), "widgets");
