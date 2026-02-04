@@ -44,3 +44,5 @@ make DESTDIR=%{buildroot} install
 /usr/share/icons/hicolor/scalable/apps/reelvault.svg
 
 %changelog
+* Tue Feb 04 2026 ReelVault <noreply@github.com> - @VERSION@-1
+- Initial package

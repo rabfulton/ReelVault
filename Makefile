@@ -2,9 +2,14 @@
 # Makefile for building the application
 
 CC = gcc
-PKGS = gtk+-3.0 sqlite3 libcurl json-c libturbojpeg
+PKGS = gtk+-3.0 sqlite3 libcurl json-c
 CFLAGS = -Wall -Wextra -g -O2 $(shell pkg-config --cflags $(PKGS))
-LDFLAGS = $(shell pkg-config --libs $(PKGS)) -lpthread
+
+# Some distros don't ship a pkg-config file for TurboJPEG (libturbojpeg.pc).
+# The header is typically in a default include path, and linking with -lturbojpeg
+# is sufficient.
+TURBOJPEG_LIBS ?= $(shell pkg-config --libs libturbojpeg 2>/dev/null || echo -lturbojpeg)
+LDFLAGS = $(shell pkg-config --libs $(PKGS)) $(TURBOJPEG_LIBS) -lpthread
 DEPFLAGS = -MMD -MP
 
 SRC_DIR = src
