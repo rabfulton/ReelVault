@@ -63,7 +63,7 @@ jobs:
           dnf -y install \
             git make gcc rpm-build \
             gtk3-devel sqlite-devel libcurl-devel json-c-devel \
-            libjpeg-turbo-devel \
+            turbojpeg-devel \
             pkgconf-pkg-config \
             tar gzip which
 

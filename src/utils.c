@@ -7,19 +7,14 @@
 #include <string.h>
 
 /* TurboJPEG header location varies by distro. */
-#if defined(__has_include)
-#  if __has_include(<turbojpeg.h>)
-#    include <turbojpeg.h>
-#    define REELVAULT_HAVE_TURBOJPEG 1
-#  elif __has_include(<turbojpeg/turbojpeg.h>)
-#    include <turbojpeg/turbojpeg.h>
-#    define REELVAULT_HAVE_TURBOJPEG 1
-#  else
-#    define REELVAULT_HAVE_TURBOJPEG 0
-#  endif
-#else
+#if __has_include(<turbojpeg.h>)
 #  include <turbojpeg.h>
 #  define REELVAULT_HAVE_TURBOJPEG 1
+#elif __has_include(<turbojpeg/turbojpeg.h>)
+#  include <turbojpeg/turbojpeg.h>
+#  define REELVAULT_HAVE_TURBOJPEG 1
+#else
+#  define REELVAULT_HAVE_TURBOJPEG 0
 #endif
 
 /* Quality/release tags to strip from titles */
