@@ -8,9 +8,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <glib/gstdio.h>
-
-/* Placeholder poster path */
-static const char *PLACEHOLDER_ICON = "video-x-generic";
+#include <unistd.h>
 
 static gboolean startup_debug_enabled(void) {
   static gint inited = 0;
@@ -41,12 +39,98 @@ static void startup_log(const char *fmt, ...) {
 }
 
 typedef struct {
+  ReelApp *app;
   gchar *path;
   gint width;
   gint height;
-  GWeakRef image_ref;
+  GWeakRef widget_ref;
   GdkPixbuf *pixbuf;
 } PosterLoadTask;
+
+static void poster_area_destroy(GtkWidget *widget, gpointer user_data) {
+  ReelApp *app = (ReelApp *)user_data;
+  if (!app)
+    return;
+  if (g_object_get_data(G_OBJECT(widget), "poster_loaded")) {
+    app->grid_posters_loaded--;
+  }
+}
+
+static gchar *grid_make_tmp_path_in_dir(const gchar *dest_path) {
+  if (!dest_path)
+    return NULL;
+  gchar *dir = g_path_get_dirname(dest_path);
+  if (!dir)
+    return NULL;
+  gchar *tmpl = g_build_filename(dir, ".reelvault_tmp_XXXXXX", NULL);
+  g_free(dir);
+  return tmpl;
+}
+
+static void grid_save_pixbuf_jpeg_atomic(GdkPixbuf *pixbuf,
+                                        const gchar *dest_path) {
+  if (!pixbuf || !dest_path)
+    return;
+
+  gchar *tmp_template = grid_make_tmp_path_in_dir(dest_path);
+  if (!tmp_template)
+    return;
+
+  int fd = g_mkstemp(tmp_template);
+  if (fd < 0) {
+    g_free(tmp_template);
+    return;
+  }
+  close(fd);
+
+  GError *error = NULL;
+  gboolean ok = gdk_pixbuf_save(pixbuf, tmp_template, "jpeg", &error, "quality",
+                                "85", NULL);
+  if (error)
+    g_error_free(error);
+  if (!ok) {
+    g_unlink(tmp_template);
+    g_free(tmp_template);
+    return;
+  }
+
+  if (g_rename(tmp_template, dest_path) != 0) {
+    g_unlink(tmp_template);
+  }
+  g_free(tmp_template);
+}
+
+static gboolean poster_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) {
+  (void)user_data;
+  GtkAllocation alloc;
+  gtk_widget_get_allocation(widget, &alloc);
+  if (alloc.width <= 0 || alloc.height <= 0)
+    return FALSE;
+
+  GdkPixbuf *pixbuf = g_object_get_data(G_OBJECT(widget), "poster_pixbuf");
+  if (!pixbuf) {
+    cairo_set_source_rgb(cr, 0.15, 0.15, 0.15);
+    cairo_rectangle(cr, 0, 0, alloc.width, alloc.height);
+    cairo_fill(cr);
+    return FALSE;
+  }
+
+  gint pw = gdk_pixbuf_get_width(pixbuf);
+  gint ph = gdk_pixbuf_get_height(pixbuf);
+  if (pw <= 0 || ph <= 0)
+    return FALSE;
+
+  gdouble sx = (gdouble)alloc.width / (gdouble)pw;
+  gdouble sy = (gdouble)alloc.height / (gdouble)ph;
+
+  cairo_save(cr);
+  cairo_scale(cr, sx, sy);
+  gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
+  cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+  cairo_paint(cr);
+  cairo_restore(cr);
+  return FALSE;
+}
 
 static gboolean thumb_is_fresh(const gchar *original_path,
                                const gchar *thumb_path) {
@@ -94,16 +178,25 @@ static gchar *grid_thumb_path_for_original(const gchar *poster_path) {
 
 static gboolean poster_apply_idle(gpointer data) {
   PosterLoadTask *task = (PosterLoadTask *)data;
-  GtkWidget *image = g_weak_ref_get(&task->image_ref);
-  if (image) {
+  GtkWidget *widget = g_weak_ref_get(&task->widget_ref);
+  if (widget) {
     if (task->pixbuf) {
-      gtk_image_set_from_pixbuf(GTK_IMAGE(image), task->pixbuf);
+      if (!g_object_get_data(G_OBJECT(widget), "poster_loaded")) {
+        g_object_set_data(G_OBJECT(widget), "poster_loaded",
+                          GINT_TO_POINTER(1));
+        if (task->app)
+          task->app->grid_posters_loaded++;
+      }
+      g_object_set_data_full(G_OBJECT(widget), "poster_pixbuf",
+                             g_object_ref(task->pixbuf),
+                             (GDestroyNotify)g_object_unref);
+      gtk_widget_queue_draw(widget);
     }
-    g_object_unref(image);
+    g_object_unref(widget);
   }
   if (task->pixbuf)
     g_object_unref(task->pixbuf);
-  g_weak_ref_clear(&task->image_ref);
+  g_weak_ref_clear(&task->widget_ref);
   g_free(task->path);
   g_free(task);
   return G_SOURCE_REMOVE;
@@ -120,31 +213,41 @@ static void poster_load_worker(gpointer data, gpointer user_data) {
   }
 
   /* Best effort: if we were asked to load the original and the thumb doesn't
-     exist yet (older installs) or is stale, generate it once in the background. */
-  gchar *thumb_path = grid_thumb_path_for_original(task->path);
-  if (thumb_path && !g_str_has_suffix(task->path, "_thumb.jpg") &&
-      (!g_file_test(thumb_path, G_FILE_TEST_EXISTS) ||
-       !thumb_is_fresh(task->path, thumb_path))) {
-    GError *thumb_err = NULL;
-    GdkPixbuf *thumb = gdk_pixbuf_new_from_file_at_scale(
-        task->path, POSTER_THUMB_WIDTH, POSTER_THUMB_HEIGHT, TRUE, &thumb_err);
-    if (thumb) {
-      gdk_pixbuf_save(thumb, thumb_path, "jpeg", &thumb_err, "quality", "85",
-                      NULL);
-      g_object_unref(thumb);
-    }
-    if (thumb_err)
-      g_error_free(thumb_err);
-  }
-  g_free(thumb_path);
+     exist yet (older installs) or is stale, generate it once in the background.
+     For display, always prefer the thumb to keep memory bounded. */
+  gchar *thumb_path = NULL;
+  const gchar *load_path = task->path;
 
+  if (!g_str_has_suffix(task->path, "_thumb.jpg")) {
+    thumb_path = grid_thumb_path_for_original(task->path);
+    if (thumb_path) {
+      gboolean need_thumb = (!g_file_test(thumb_path, G_FILE_TEST_EXISTS) ||
+                             !thumb_is_fresh(task->path, thumb_path));
+      if (need_thumb) {
+        GError *thumb_err = NULL;
+        GdkPixbuf *thumb = gdk_pixbuf_new_from_file_at_scale(
+            task->path, POSTER_THUMB_WIDTH, POSTER_THUMB_HEIGHT, TRUE, &thumb_err);
+        if (thumb) {
+          grid_save_pixbuf_jpeg_atomic(thumb, thumb_path);
+          g_object_unref(thumb);
+        }
+        if (thumb_err)
+          g_error_free(thumb_err);
+      }
+      if (g_file_test(thumb_path, G_FILE_TEST_EXISTS)) {
+        load_path = thumb_path;
+      }
+    }
+  }
+
+  /* Load the thumbnail at its native size to keep memory bounded. */
   GError *error = NULL;
-  task->pixbuf =
-      gdk_pixbuf_new_from_file_at_scale(task->path, task->width, task->height,
-                                        TRUE, &error);
+  task->pixbuf = gdk_pixbuf_new_from_file(load_path, &error);
   if (!task->pixbuf && error) {
     g_error_free(error);
   }
+
+  g_free(thumb_path);
 
   if (startup_debug_enabled() && log_n < 15) {
     startup_log("poster_load_worker: loaded pixbuf=%s", task->pixbuf ? "yes" : "no");
@@ -190,14 +293,13 @@ static GtkWidget *create_poster_widget(ReelApp *app, Film *film) {
   gtk_box_pack_start(GTK_BOX(box), overlay, FALSE, FALSE, 0);
 
   /* Poster image */
-  GtkWidget *image =
-      gtk_image_new_from_icon_name(PLACEHOLDER_ICON, GTK_ICON_SIZE_DIALOG);
-  gtk_image_set_pixel_size(GTK_IMAGE(image), poster_height);
-
-  gtk_widget_set_size_request(image, poster_width, poster_height);
-  gtk_widget_set_halign(image, GTK_ALIGN_CENTER);
-  gtk_widget_set_valign(image, GTK_ALIGN_START);
-  gtk_container_add(GTK_CONTAINER(overlay), image);
+  GtkWidget *poster_area = gtk_drawing_area_new();
+  gtk_widget_set_size_request(poster_area, poster_width, poster_height);
+  gtk_widget_set_halign(poster_area, GTK_ALIGN_CENTER);
+  gtk_widget_set_valign(poster_area, GTK_ALIGN_START);
+  g_signal_connect(poster_area, "draw", G_CALLBACK(poster_draw), NULL);
+  g_signal_connect(poster_area, "destroy", G_CALLBACK(poster_area_destroy), app);
+  gtk_container_add(GTK_CONTAINER(overlay), poster_area);
 
   if (film->poster_path && g_file_test(film->poster_path, G_FILE_TEST_EXISTS)) {
     gchar *poster_path = grid_poster_path_for_grid(film->poster_path);
@@ -208,10 +310,11 @@ static GtkWidget *create_poster_widget(ReelApp *app, Film *film) {
       }
 
       PosterLoadTask *task = g_new0(PosterLoadTask, 1);
+      task->app = app;
       task->path = poster_path;
       task->width = poster_width;
       task->height = poster_height;
-      g_weak_ref_init(&task->image_ref, image);
+      g_weak_ref_init(&task->widget_ref, poster_area);
       g_thread_pool_push(app->thread_pool, task, NULL);
     }
   }

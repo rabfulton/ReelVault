@@ -15,6 +15,7 @@ typedef struct {
   MediaType media_type;
   GtkWidget *dialog;
   GtkWidget *search_entry;
+  GtkWidget *tv_checkbox;
   GtkWidget *results_list;
   GList *search_results;
 } MatchDialogContext;
@@ -22,11 +23,13 @@ typedef struct {
 static void on_search_clicked(GtkButton *button, gpointer user_data);
 static void on_apply_clicked(GtkButton *button, gpointer user_data);
 static void context_free(MatchDialogContext *ctx);
+static void on_tv_toggle(GtkToggleButton *button, gpointer user_data);
 
 typedef struct {
   ReelApp *app;
   gint64 film_id;
   gint tmdb_id;
+  gboolean convert_to_tv_season;
   gboolean success;
   GWeakRef dialog_ref;
   GWeakRef busy_ref;
@@ -90,6 +93,25 @@ static gpointer apply_match_thread(gpointer data) {
 
   ReelApp thread_app = *task->app;
   thread_app.db = db;
+
+  if (task->convert_to_tv_season) {
+    Film *film = db_film_get_by_id(&thread_app, task->film_id);
+    if (film) {
+      film->media_type = MEDIA_TV_SEASON;
+      if (film->season_number <= 0)
+        film->season_number = 1;
+      db_film_update(&thread_app, film);
+      film_free(film);
+    }
+  } else {
+    /* If the user is matching as a movie, ensure the entry is treated as a film. */
+    Film *film = db_film_get_by_id(&thread_app, task->film_id);
+    if (film) {
+      film->media_type = MEDIA_FILM;
+      db_film_update(&thread_app, film);
+      film_free(film);
+    }
+  }
 
   task->success = scraper_fetch_and_update(&thread_app, task->film_id, task->tmdb_id);
 
@@ -170,6 +192,16 @@ void match_show(ReelApp *app, gint64 film_id) {
   g_signal_connect(search_btn, "clicked", G_CALLBACK(on_search_clicked), ctx);
   gtk_box_pack_start(GTK_BOX(search_box), search_btn, FALSE, FALSE, 0);
 
+  /* Always allow switching search type to fix mischaracterized entries. */
+  GtkWidget *tv_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+  gtk_box_pack_start(GTK_BOX(content), tv_box, FALSE, FALSE, 0);
+
+  ctx->tv_checkbox = gtk_check_button_new_with_label("Search TV series");
+  gtk_box_pack_start(GTK_BOX(tv_box), ctx->tv_checkbox, FALSE, FALSE, 0);
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ctx->tv_checkbox),
+                               film->media_type == MEDIA_TV_SEASON);
+  g_signal_connect(ctx->tv_checkbox, "toggled", G_CALLBACK(on_tv_toggle), ctx);
+
   /* Allow Enter to search */
   g_signal_connect(ctx->search_entry, "activate",
                    G_CALLBACK(on_search_entry_activate), ctx);
@@ -234,6 +266,15 @@ static void clear_results(MatchDialogContext *ctx) {
   }
 }
 
+static void on_tv_toggle(GtkToggleButton *button, gpointer user_data) {
+  MatchDialogContext *ctx = (MatchDialogContext *)user_data;
+  gboolean enabled = gtk_toggle_button_get_active(button);
+
+  gtk_entry_set_placeholder_text(GTK_ENTRY(ctx->search_entry),
+                                 enabled ? "Search TMDB TV..." : "Search TMDB...");
+  clear_results(ctx);
+}
+
 static void on_search_clicked(GtkButton *button, gpointer user_data) {
   (void)button;
   MatchDialogContext *ctx = (MatchDialogContext *)user_data;
@@ -245,7 +286,9 @@ static void on_search_clicked(GtkButton *button, gpointer user_data) {
   clear_results(ctx);
 
   /* Search TMDB */
-  if (ctx->media_type == MEDIA_TV_SEASON) {
+  if (ctx->media_type == MEDIA_TV_SEASON ||
+      (ctx->tv_checkbox &&
+       gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ctx->tv_checkbox)))) {
     ctx->search_results = scraper_search_tv(ctx->app, query, 0);
   } else {
     ctx->search_results = scraper_search_tmdb(ctx->app, query, 0);
@@ -315,6 +358,9 @@ static void on_apply_clicked(GtkButton *button, gpointer user_data) {
   task->app = ctx->app;
   task->film_id = ctx->film_id;
   task->tmdb_id = tmdb_id;
+  task->convert_to_tv_season =
+      (ctx->tv_checkbox &&
+       gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ctx->tv_checkbox)));
 
   GtkWidget *busy_dialog = gtk_message_dialog_new(
       GTK_WINDOW(ctx->dialog), GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_NONE,

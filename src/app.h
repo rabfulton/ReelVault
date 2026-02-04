@@ -93,6 +93,7 @@ struct _FilterState {
 struct _ReelApp {
   GtkApplication *app;
   GtkWidget *window;
+  GtkWidget *grid_scrolled;
   GtkWidget *grid_view;
   GtkWidget *filter_bar;
   GtkWidget *status_bar;
@@ -137,9 +138,15 @@ struct _ReelApp {
   /* Async film loading / grid population */
   guint films_refresh_gen;
   gboolean films_loading;
+  gint films_next_offset;
+  gboolean films_end_reached;
   GList *grid_pending; /* List of Film* (nodes owned by grid) */
   guint grid_idle_source;
   gboolean genres_dirty;
+
+  /* Debug/metrics */
+  gint grid_posters_loaded;
+  guint mem_debug_source;
 };
 
 /* Function prototypes - app lifecycle */

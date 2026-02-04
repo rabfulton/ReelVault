@@ -12,6 +12,57 @@
 #include "scraper.h"
 #include <stdarg.h>
 #include <string.h>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
+
+static guint64 read_rss_kb(void) {
+  gchar *contents = NULL;
+  gsize len = 0;
+  if (!g_file_get_contents("/proc/self/status", &contents, &len, NULL) ||
+      !contents) {
+    g_free(contents);
+    return 0;
+  }
+
+  guint64 rss_kb = 0;
+  gchar **lines = g_strsplit(contents, "\n", -1);
+  for (gchar **p = lines; p && *p; p++) {
+    if (g_str_has_prefix(*p, "VmRSS:")) {
+      gchar **parts = g_strsplit_set(*p, " \t", -1);
+      for (gchar **q = parts; q && *q; q++) {
+        if (**q && g_ascii_isdigit(**q)) {
+          rss_kb = (guint64)g_ascii_strtoull(*q, NULL, 10);
+          break;
+        }
+      }
+      g_strfreev(parts);
+      break;
+    }
+  }
+  g_strfreev(lines);
+  g_free(contents);
+  return rss_kb;
+}
+
+static void maybe_malloc_trim(void) {
+#ifdef __GLIBC__
+  const gchar *env = g_getenv("REELVAULT_MALLOC_TRIM");
+  if (env && *env && g_strcmp0(env, "0") != 0) {
+    malloc_trim(0);
+  }
+#endif
+}
+
+static gboolean mem_debug_tick(gpointer data) {
+  ReelApp *app = (ReelApp *)data;
+  if (!app)
+    return G_SOURCE_REMOVE;
+  g_printerr("[mem] rss=%lukB films_loaded=%d posters_loaded=%d\n",
+             (unsigned long)read_rss_kb(), app->films_next_offset,
+             app->grid_posters_loaded);
+  return G_SOURCE_CONTINUE;
+}
 
 /* Forward declarations */
 static void apply_theme_css(ReelApp *app);
@@ -56,6 +107,8 @@ typedef struct {
   gchar *db_path;
   FilterState filter;
   gint offset_start;
+  gint page_size;
+  gboolean include_counts;
 } FilmsLoadRequest;
 
 typedef struct {
@@ -77,6 +130,9 @@ static gboolean films_counts_idle(gpointer data);
 static gboolean films_page_idle(gpointer data);
 static gboolean films_done_idle(gpointer data);
 static gpointer films_load_thread(gpointer data);
+static void request_next_page(ReelApp *app);
+static void maybe_request_next_page(ReelApp *app);
+static void on_grid_scroll_changed(GtkAdjustment *adj, gpointer user_data);
 
 void window_apply_theme(ReelApp *app, GtkWidget *toplevel) {
   if (!toplevel)
@@ -150,8 +206,20 @@ static gboolean films_page_idle(gpointer data) {
     return G_SOURCE_REMOVE;
   }
 
+  if (!p->films) {
+    p->app->films_end_reached = TRUE;
+    g_free(p);
+    return G_SOURCE_REMOVE;
+  }
+
+  gint added = g_list_length(p->films);
   p->app->films = g_list_concat(p->app->films, p->films);
   grid_append_films(p->app, p->films);
+  p->app->films_next_offset += added;
+  if (added < 250)
+    p->app->films_end_reached = TRUE;
+
+  maybe_request_next_page(p->app);
   g_free(p);
   return G_SOURCE_REMOVE;
 }
@@ -159,7 +227,8 @@ static gboolean films_page_idle(gpointer data) {
 static gboolean films_done_idle(gpointer data) {
   FilmsLoadRequest *req = (FilmsLoadRequest *)data;
   if (req->gen == req->app->films_refresh_gen) {
-    req->app->films_loading = FALSE;
+    if (req->page_size > 0)
+      req->app->films_loading = FALSE;
     if (req->app->genres_dirty) {
       filter_bar_refresh(req->app);
       req->app->genres_dirty = FALSE;
@@ -182,36 +251,31 @@ static gpointer films_load_thread(gpointer data) {
     return NULL;
   }
 
-  FilmsCountsPayload *counts = g_new0(FilmsCountsPayload, 1);
-  counts->app = req->app;
-  counts->gen = req->gen;
-  counts->total = db_films_count_db(db);
-  counts->unmatched = db_films_count_unmatched_db(db);
-  startup_log("films_load_thread: counts total=%d unmatched=%d", counts->total,
-              counts->unmatched);
-  g_idle_add(films_counts_idle, counts);
+  if (req->include_counts) {
+    FilmsCountsPayload *counts = g_new0(FilmsCountsPayload, 1);
+    counts->app = req->app;
+    counts->gen = req->gen;
+    counts->total = db_films_count_db(db);
+    counts->unmatched = db_films_count_unmatched_db(db);
+    startup_log("films_load_thread: counts total=%d unmatched=%d", counts->total,
+                counts->unmatched);
+    g_idle_add(films_counts_idle, counts);
+  }
 
-  const int page_size = 250;
-  for (int offset = req->offset_start;; offset += page_size) {
-    if (req->gen != req->app->films_refresh_gen)
-      break;
-
+  if (req->page_size > 0 && req->gen == req->app->films_refresh_gen) {
     gint64 t_page0 = g_get_monotonic_time();
-    GList *page = db_films_get_page_db(db, &req->filter, page_size, offset);
+    GList *page =
+        db_films_get_page_db(db, &req->filter, req->page_size, req->offset_start);
     gint64 page_ms = (g_get_monotonic_time() - t_page0) / 1000;
-    if (!page)
-      break;
-    startup_log("films_load_thread: loaded page offset=%d size=%d (%ldms)", offset,
-                g_list_length(page), (long)page_ms);
+    int page_len = page ? g_list_length(page) : 0;
+    startup_log("films_load_thread: loaded page offset=%d size=%d (%ldms)",
+                req->offset_start, page_len, (long)page_ms);
 
     FilmsPagePayload *p = g_new0(FilmsPagePayload, 1);
     p->app = req->app;
     p->gen = req->gen;
-    p->films = page;
+    p->films = page; /* may be NULL */
     g_idle_add(films_page_idle, p);
-
-    if (g_list_length(page) < page_size)
-      break;
   }
 
   db_close_handle(db);
@@ -291,14 +355,21 @@ void window_create(ReelApp *app) {
   gtk_box_pack_start(GTK_BOX(main_box), app->filter_bar, FALSE, FALSE, 0);
 
   /* Scrolled window for poster grid */
-  GtkWidget *scrolled = gtk_scrolled_window_new(NULL, NULL);
-  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
+  app->grid_scrolled = gtk_scrolled_window_new(NULL, NULL);
+  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(app->grid_scrolled),
                                  GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-  gtk_box_pack_start(GTK_BOX(main_box), scrolled, TRUE, TRUE, 0);
+  gtk_box_pack_start(GTK_BOX(main_box), app->grid_scrolled, TRUE, TRUE, 0);
 
   /* Poster grid */
   app->grid_view = grid_create(app);
-  gtk_container_add(GTK_CONTAINER(scrolled), app->grid_view);
+  gtk_container_add(GTK_CONTAINER(app->grid_scrolled), app->grid_view);
+
+  GtkAdjustment *vadj =
+      gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(app->grid_scrolled));
+  if (vadj) {
+    g_signal_connect(vadj, "value-changed", G_CALLBACK(on_grid_scroll_changed),
+                     app);
+  }
 
   /* Status bar */
   app->status_bar = NULL;
@@ -308,6 +379,13 @@ void window_create(ReelApp *app) {
   window_refresh_films(app);
   window_update_status_bar(app);
   filter_bar_refresh(app);
+
+  if (!app->mem_debug_source) {
+    const gchar *env = g_getenv("REELVAULT_MEM_DEBUG");
+    if (env && *env && g_strcmp0(env, "0") != 0) {
+      app->mem_debug_source = g_timeout_add_seconds(5, mem_debug_tick, app);
+    }
+  }
 
   /* Apply theme CSS */
   apply_theme_css(app);
@@ -499,13 +577,17 @@ void window_refresh_films(ReelApp *app) {
   startup_log("window_refresh_films: begin gen=%u", app->films_refresh_gen + 1);
   /* Cancel any existing grid population and clear current UI quickly. */
   app->films_refresh_gen++;
-  app->films_loading = TRUE;
+  app->films_loading = FALSE;
+  app->films_end_reached = FALSE;
+  app->films_next_offset = 0;
 
   if (app->films) {
     g_list_free_full(app->films, (GDestroyNotify)film_free);
     app->films = NULL;
   }
   grid_clear(app);
+  app->grid_posters_loaded = 0;
+  maybe_malloc_trim();
 
   /* Fast first paint: load a small first page synchronously on the UI thread. */
   const int first_page = 80;
@@ -518,17 +600,70 @@ void window_refresh_films(ReelApp *app) {
     app->films = initial;
     grid_append_films(app, initial);
   }
+  app->films_next_offset = initial ? g_list_length(initial) : 0;
+  app->films_end_reached = (!initial || app->films_next_offset < first_page);
 
   FilmsLoadRequest *req = g_new0(FilmsLoadRequest, 1);
   req->app = app;
   req->gen = app->films_refresh_gen;
   req->db_path = g_strdup(app->db_path);
   filter_state_clone(&req->filter, &app->filter);
-  req->offset_start = first_page;
+  req->offset_start = 0;
+  req->page_size = 0; /* counts only */
+  req->include_counts = TRUE;
 
-  startup_log("window_refresh_films: start films_load_thread from offset=%d",
-              req->offset_start);
+  startup_log("window_refresh_films: start films_load_thread (counts only)");
   g_thread_new("films-load", films_load_thread, req);
+
+  /* If the first page doesn't fill the viewport, load more lazily. */
+  maybe_request_next_page(app);
+}
+
+static void request_next_page(ReelApp *app) {
+  if (!app || app->films_loading || app->films_end_reached)
+    return;
+
+  app->films_loading = TRUE;
+
+  FilmsLoadRequest *req = g_new0(FilmsLoadRequest, 1);
+  req->app = app;
+  req->gen = app->films_refresh_gen;
+  req->db_path = g_strdup(app->db_path);
+  filter_state_clone(&req->filter, &app->filter);
+  req->offset_start = app->films_next_offset;
+  req->page_size = 250;
+  req->include_counts = FALSE;
+
+  startup_log("request_next_page: offset=%d", req->offset_start);
+  g_thread_new("films-load", films_load_thread, req);
+}
+
+static void maybe_request_next_page(ReelApp *app) {
+  if (!app || app->films_loading || app->films_end_reached)
+    return;
+  if (!app->grid_scrolled)
+    return;
+
+  GtkAdjustment *adj =
+      gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(app->grid_scrolled));
+  if (!adj)
+    return;
+
+  gdouble value = gtk_adjustment_get_value(adj);
+  gdouble page = gtk_adjustment_get_page_size(adj);
+  gdouble upper = gtk_adjustment_get_upper(adj);
+
+  /* Load more when near bottom or when there's no real scrolling yet. */
+  gdouble remaining = upper - (value + page);
+  if (remaining < 400 || upper <= page + 1) {
+    request_next_page(app);
+  }
+}
+
+static void on_grid_scroll_changed(GtkAdjustment *adj, gpointer user_data) {
+  (void)adj;
+  ReelApp *app = (ReelApp *)user_data;
+  maybe_request_next_page(app);
 }
 
 void window_update_status_bar(ReelApp *app) {
