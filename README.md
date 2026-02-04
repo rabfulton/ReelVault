@@ -75,15 +75,16 @@ title: alien
 - SQLite 3
 - libcurl
 - json-c
+- libjpeg-turbo (libturbojpeg)
 
 #### Arch Linux
 ```bash
-sudo pacman -S base-devel gtk3 sqlite curl json-c
+sudo pacman -S base-devel gtk3 sqlite curl json-c libjpeg-turbo
 ```
 
 #### Debian/Ubuntu
 ```bash
-sudo apt install build-essential pkg-config libgtk-3-dev libsqlite3-dev libcurl4-openssl-dev libjson-c-dev
+sudo apt install build-essential pkg-config libgtk-3-dev libsqlite3-dev libcurl4-openssl-dev libjson-c-dev libturbojpeg0-dev
 ```
 
 ### Build

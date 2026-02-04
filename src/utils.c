@@ -5,6 +5,7 @@
 #include "utils.h"
 #include <ctype.h>
 #include <string.h>
+#include <turbojpeg.h>
 
 /* Quality/release tags to strip from titles */
 static const char *STRIP_TAGS[] = {
@@ -79,4 +80,140 @@ gchar *utils_format_runtime(gint minutes) {
   } else {
     return g_strdup_printf("%dm", mins);
   }
+}
+
+static GdkPixbuf *pixbuf_scale_fit(GdkPixbuf *pixbuf, gint width, gint height,
+                                   gboolean preserve_aspect) {
+  if (!pixbuf || width <= 0 || height <= 0)
+    return NULL;
+
+  gint ow = gdk_pixbuf_get_width(pixbuf);
+  gint oh = gdk_pixbuf_get_height(pixbuf);
+  if (ow <= 0 || oh <= 0)
+    return NULL;
+
+  gint tw = width;
+  gint th = height;
+  if (preserve_aspect) {
+    gdouble sx = (gdouble)width / (gdouble)ow;
+    gdouble sy = (gdouble)height / (gdouble)oh;
+    gdouble s = (sx < sy) ? sx : sy;
+    if (s <= 0.0)
+      return NULL;
+    tw = (gint)(ow * s + 0.5);
+    th = (gint)(oh * s + 0.5);
+    if (tw < 1)
+      tw = 1;
+    if (th < 1)
+      th = 1;
+  }
+
+  if (tw == ow && th == oh)
+    return g_object_ref(pixbuf);
+
+  return gdk_pixbuf_scale_simple(pixbuf, tw, th, GDK_INTERP_BILINEAR);
+}
+
+static void utils_pixbuf_free_pixels(guchar *pixels, gpointer user_data) {
+  (void)user_data;
+  g_free(pixels);
+}
+
+static gboolean utils_path_is_jpeg(const gchar *path) {
+  if (!path)
+    return FALSE;
+  return g_str_has_suffix(path, ".jpg") || g_str_has_suffix(path, ".JPG") ||
+         g_str_has_suffix(path, ".jpeg") || g_str_has_suffix(path, ".JPEG");
+}
+
+static GdkPixbuf *utils_pixbuf_new_from_jpeg_turbo(const gchar *path,
+                                                   GError **error) {
+  if (!path)
+    return NULL;
+
+  guchar *jpeg_buf = NULL;
+  gsize jpeg_len = 0;
+  if (!g_file_get_contents(path, (gchar **)&jpeg_buf, &jpeg_len, error)) {
+    return NULL;
+  }
+
+  tjhandle handle = tjInitDecompress();
+  if (!handle) {
+    g_free(jpeg_buf);
+    g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
+                "turbojpeg init failed");
+    return NULL;
+  }
+
+  int width = 0, height = 0, subsamp = 0, cs = 0;
+  if (tjDecompressHeader3(handle, jpeg_buf, (unsigned long)jpeg_len, &width,
+                          &height, &subsamp, &cs) != 0) {
+    const char *msg = tjGetErrorStr2(handle);
+    tjDestroy(handle);
+    g_free(jpeg_buf);
+    g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
+                "turbojpeg header failed: %s", msg ? msg : "unknown");
+    return NULL;
+  }
+
+  if (width <= 0 || height <= 0) {
+    tjDestroy(handle);
+    g_free(jpeg_buf);
+    g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
+                "turbojpeg invalid dimensions");
+    return NULL;
+  }
+
+  gsize stride = (gsize)width * 3;
+  gsize buf_sz = (gsize)height * stride;
+  guchar *rgb = g_malloc(buf_sz);
+
+  if (tjDecompress2(handle, jpeg_buf, (unsigned long)jpeg_len, rgb, width,
+                    (int)stride, height, TJPF_RGB, TJFLAG_ACCURATEDCT) != 0) {
+    const char *msg = tjGetErrorStr2(handle);
+    tjDestroy(handle);
+    g_free(jpeg_buf);
+    g_free(rgb);
+    g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_FAILED,
+                "turbojpeg decompress failed: %s", msg ? msg : "unknown");
+    return NULL;
+  }
+
+  tjDestroy(handle);
+  g_free(jpeg_buf);
+
+  return gdk_pixbuf_new_from_data(rgb, GDK_COLORSPACE_RGB, FALSE, 8, width,
+                                 height, (int)stride, utils_pixbuf_free_pixels,
+                                 NULL);
+}
+
+GdkPixbuf *utils_pixbuf_new_from_file_at_scale_safe(const gchar *path, gint width,
+                                                    gint height,
+                                                    gboolean preserve_aspect,
+                                                    GError **error) {
+  if (!path)
+    return NULL;
+
+  /* Work around rare JPEG decode issues by using libjpeg-turbo when possible. */
+  GdkPixbuf *full = NULL;
+  if (utils_path_is_jpeg(path)) {
+    GError *tj_err = NULL;
+    full = utils_pixbuf_new_from_jpeg_turbo(path, &tj_err);
+    if (!full && tj_err) {
+      g_error_free(tj_err);
+    }
+  }
+
+  if (!full) {
+    full = gdk_pixbuf_new_from_file(path, error);
+  }
+  if (!full)
+    return NULL;
+
+  if (width <= 0 || height <= 0)
+    return full;
+
+  GdkPixbuf *scaled = pixbuf_scale_fit(full, width, height, preserve_aspect);
+  g_object_unref(full);
+  return scaled;
 }

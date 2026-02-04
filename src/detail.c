@@ -7,6 +7,7 @@
 #include "db.h"
 #include "match.h"
 #include "player.h"
+#include "utils.h"
 #include "window.h"
 #include <string.h>
 
@@ -200,8 +201,8 @@ void detail_show(ReelApp *app, gint64 film_id) {
 
   GtkWidget *poster_image;
   if (film->poster_path && g_file_test(film->poster_path, G_FILE_TEST_EXISTS)) {
-    GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(film->poster_path,
-                                                          375, 562, TRUE, NULL);
+    GdkPixbuf *pixbuf = utils_pixbuf_new_from_file_at_scale_safe(
+        film->poster_path, 375, 562, TRUE, NULL);
     if (pixbuf) {
       poster_image = gtk_image_new_from_pixbuf(pixbuf);
       g_object_unref(pixbuf);

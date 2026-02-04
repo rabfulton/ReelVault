@@ -5,6 +5,7 @@
 
 #include "grid.h"
 #include "detail.h"
+#include "utils.h"
 #include <stdarg.h>
 #include <string.h>
 #include <glib/gstdio.h>
@@ -147,25 +148,6 @@ static gboolean thumb_is_fresh(const gchar *original_path,
   return st_thumb.st_mtime >= st_original.st_mtime;
 }
 
-static gchar *grid_poster_path_for_grid(const gchar *poster_path) {
-  if (!poster_path)
-    return NULL;
-
-  /* Prefer cached thumbnail: /path/123_thumb.jpg for /path/123.jpg */
-  const gchar *dot = strrchr(poster_path, '.');
-  if (!dot)
-    return g_strdup(poster_path);
-
-  gchar *thumb =
-      g_strdup_printf("%.*s_thumb%s", (int)(dot - poster_path), poster_path, dot);
-  if (g_file_test(thumb, G_FILE_TEST_EXISTS) && thumb_is_fresh(poster_path, thumb)) {
-    return thumb;
-  }
-
-  g_free(thumb);
-  return g_strdup(poster_path);
-}
-
 static gchar *grid_thumb_path_for_original(const gchar *poster_path) {
   if (!poster_path)
     return NULL;
@@ -213,19 +195,19 @@ static void poster_load_worker(gpointer data, gpointer user_data) {
   }
 
   /* Best effort: if we were asked to load the original and the thumb doesn't
-     exist yet (older installs) or is stale, generate it once in the background.
-     For display, always prefer the thumb to keep memory bounded. */
+     exist yet or is stale, generate it once in the background. For display,
+     always prefer the thumb to keep memory bounded. */
   gchar *thumb_path = NULL;
-  const gchar *load_path = task->path;
 
   if (!g_str_has_suffix(task->path, "_thumb.jpg")) {
     thumb_path = grid_thumb_path_for_original(task->path);
     if (thumb_path) {
       gboolean need_thumb = (!g_file_test(thumb_path, G_FILE_TEST_EXISTS) ||
                              !thumb_is_fresh(task->path, thumb_path));
+
       if (need_thumb) {
         GError *thumb_err = NULL;
-        GdkPixbuf *thumb = gdk_pixbuf_new_from_file_at_scale(
+        GdkPixbuf *thumb = utils_pixbuf_new_from_file_at_scale_safe(
             task->path, POSTER_THUMB_WIDTH, POSTER_THUMB_HEIGHT, TRUE, &thumb_err);
         if (thumb) {
           grid_save_pixbuf_jpeg_atomic(thumb, thumb_path);
@@ -234,17 +216,20 @@ static void poster_load_worker(gpointer data, gpointer user_data) {
         if (thumb_err)
           g_error_free(thumb_err);
       }
-      if (g_file_test(thumb_path, G_FILE_TEST_EXISTS)) {
-        load_path = thumb_path;
-      }
     }
   }
 
-  /* Load the thumbnail at its native size to keep memory bounded. */
-  GError *error = NULL;
-  task->pixbuf = gdk_pixbuf_new_from_file(load_path, &error);
-  if (!task->pixbuf && error) {
-    g_error_free(error);
+  /* Prefer the thumb for display, but keep a robust fallback for multi-scan
+     baseline JPEGs. */
+  if (thumb_path && g_file_test(thumb_path, G_FILE_TEST_EXISTS)) {
+    GError *error = NULL;
+    task->pixbuf = gdk_pixbuf_new_from_file(thumb_path, &error);
+    if (!task->pixbuf && error) {
+      g_error_free(error);
+    }
+  } else {
+    task->pixbuf = utils_pixbuf_new_from_file_at_scale_safe(
+        task->path, POSTER_THUMB_WIDTH, POSTER_THUMB_HEIGHT, TRUE, NULL);
   }
 
   g_free(thumb_path);
@@ -302,7 +287,7 @@ static GtkWidget *create_poster_widget(ReelApp *app, Film *film) {
   gtk_container_add(GTK_CONTAINER(overlay), poster_area);
 
   if (film->poster_path && g_file_test(film->poster_path, G_FILE_TEST_EXISTS)) {
-    gchar *poster_path = grid_poster_path_for_grid(film->poster_path);
+    gchar *poster_path = g_strdup(film->poster_path);
     if (poster_path) {
       if (!app->thread_pool) {
         app->thread_pool = g_thread_pool_new(poster_load_worker, NULL, 4, FALSE,

@@ -2,7 +2,7 @@
 # Makefile for building the application
 
 CC = gcc
-PKGS = gtk+-3.0 sqlite3 libcurl json-c
+PKGS = gtk+-3.0 sqlite3 libcurl json-c libturbojpeg
 CFLAGS = -Wall -Wextra -g -O2 $(shell pkg-config --cflags $(PKGS))
 LDFLAGS = $(shell pkg-config --libs $(PKGS)) -lpthread
 DEPFLAGS = -MMD -MP

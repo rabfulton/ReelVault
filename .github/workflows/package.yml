@@ -20,6 +20,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config \
             libgtk-3-dev libsqlite3-dev libcurl4-openssl-dev libjson-c-dev \
+            libturbojpeg0-dev \
             dpkg-dev
 
       - name: Build
@@ -62,6 +63,7 @@ jobs:
           dnf -y install \
             git make gcc rpm-build \
             gtk3-devel sqlite-devel libcurl-devel json-c-devel \
+            libjpeg-turbo-devel \
             pkgconf-pkg-config \
             tar gzip which
 
@@ -161,4 +163,3 @@ jobs:
           files: |
             dist/*.deb
             dist/reelvault-[0-9]*.rpm
-

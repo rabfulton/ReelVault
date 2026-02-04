@@ -378,7 +378,7 @@ static gboolean fetch_tv_season_details(ReelApp *app, Film *film,
             NULL);
         /* Always refresh thumb to avoid stale/wrong grid posters. */
         GError *thumb_err = NULL;
-        GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(
+        GdkPixbuf *pixbuf = utils_pixbuf_new_from_file_at_scale_safe(
             dest, POSTER_THUMB_WIDTH, POSTER_THUMB_HEIGHT, TRUE, &thumb_err);
         if (pixbuf) {
           gdk_pixbuf_save(pixbuf, thumb, "jpeg", &thumb_err, "quality", "85",
@@ -621,7 +621,7 @@ gboolean scraper_download_poster(ReelApp *app, const gchar *poster_path,
 
     /* Always refresh thumb so grid never shows a stale poster. */
     GError *error = NULL;
-    GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(
+    GdkPixbuf *pixbuf = utils_pixbuf_new_from_file_at_scale_safe(
         dest, POSTER_THUMB_WIDTH, POSTER_THUMB_HEIGHT, TRUE, &error);
     if (pixbuf) {
       gdk_pixbuf_save(pixbuf, thumb, "jpeg", &error, "quality", "85", NULL);
