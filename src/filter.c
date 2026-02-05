@@ -23,6 +23,7 @@ static void on_sort_order_clicked(GtkButton *button, gpointer user_data);
 static void on_scan_clicked(GtkButton *button, gpointer user_data);
 static void on_settings_clicked(GtkButton *button, gpointer user_data);
 static void parse_search_text(ReelApp *app, const gchar *text);
+static void update_filter_state(ReelApp *app);
 
 GtkWidget *filter_bar_create(ReelApp *app) {
   /* Use a 3-column grid so the search entry can be accurately centered. */
@@ -145,6 +146,10 @@ void filter_bar_refresh(ReelApp *app) {
   if (!widgets)
     return;
 
+  const gchar *prev_genre_id =
+      gtk_combo_box_get_active_id(GTK_COMBO_BOX(widgets->genre_combo));
+  gchar *prev_genre_id_copy = g_strdup(prev_genre_id ? prev_genre_id : "");
+
   /* Block signals while updating */
   g_signal_handlers_block_matched(widgets->genre_combo, G_SIGNAL_MATCH_FUNC, 0,
                                   0, NULL, G_CALLBACK(on_filter_changed), NULL);
@@ -162,12 +167,23 @@ void filter_bar_refresh(ReelApp *app) {
   }
   g_list_free_full(genres, g_free);
 
-  gtk_combo_box_set_active(GTK_COMBO_BOX(widgets->genre_combo), 0);
+  if (prev_genre_id_copy && *prev_genre_id_copy) {
+    if (!gtk_combo_box_set_active_id(GTK_COMBO_BOX(widgets->genre_combo),
+                                     prev_genre_id_copy)) {
+      gtk_combo_box_set_active(GTK_COMBO_BOX(widgets->genre_combo), 0);
+    }
+  } else {
+    gtk_combo_box_set_active(GTK_COMBO_BOX(widgets->genre_combo), 0);
+  }
 
   /* Unblock signals */
   g_signal_handlers_unblock_matched(widgets->genre_combo, G_SIGNAL_MATCH_FUNC,
                                     0, 0, NULL, G_CALLBACK(on_filter_changed),
                                     NULL);
+
+  /* Keep filter state consistent with the refreshed widget state. */
+  update_filter_state(app);
+  g_free(prev_genre_id_copy);
 }
 
 void filter_bar_reset(ReelApp *app) {

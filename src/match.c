@@ -5,7 +5,9 @@
 
 #include "match.h"
 #include "db.h"
+#include "scanner.h"
 #include "scraper.h"
+#include "utils.h"
 #include "window.h"
 #include <string.h>
 
@@ -24,6 +26,7 @@ static void on_search_clicked(GtkButton *button, gpointer user_data);
 static void on_apply_clicked(GtkButton *button, gpointer user_data);
 static void context_free(MatchDialogContext *ctx);
 static void on_tv_toggle(GtkToggleButton *button, gpointer user_data);
+static void reset_film_to_unmatched(ReelApp *app, gint64 film_id);
 
 typedef struct {
   ReelApp *app;
@@ -236,9 +239,7 @@ void match_show(ReelApp *app, gint64 film_id) {
   gint response = gtk_dialog_run(GTK_DIALOG(ctx->dialog));
 
   if (response == GTK_RESPONSE_REJECT) {
-    /* Mark as ignored */
-    film->match_status = MATCH_STATUS_IGNORED;
-    db_film_update(app, film);
+    reset_film_to_unmatched(app, film_id);
   }
 
   gtk_widget_destroy(ctx->dialog);
@@ -246,7 +247,7 @@ void match_show(ReelApp *app, gint64 film_id) {
   film_free(film);
 
   /* Refresh main window */
-  window_refresh_film(app, film_id);
+  window_refresh_films(app);
 }
 
 static void clear_results(MatchDialogContext *ctx) {
@@ -383,4 +384,74 @@ static void context_free(MatchDialogContext *ctx) {
                      (GDestroyNotify)tmdb_search_result_free);
   }
   g_free(ctx);
+}
+
+static void reset_film_to_unmatched(ReelApp *app, gint64 film_id) {
+  if (!app)
+    return;
+
+  Film *film = db_film_get_by_id(app, film_id);
+  if (!film)
+    return;
+
+  /* Remove any scraped associations. */
+  db_film_clear_associations(app, film_id);
+  app->genres_dirty = TRUE;
+
+  /* Reset scraped fields. */
+  film->match_status = MATCH_STATUS_UNMATCHED;
+  film->tmdb_id = 0;
+  g_free(film->imdb_id);
+  film->imdb_id = NULL;
+  film->rating = 0.0;
+  film->runtime_minutes = 0;
+  g_free(film->plot);
+  film->plot = NULL;
+  g_free(film->poster_path);
+  film->poster_path = NULL;
+
+  /* Restore a reasonable "unknown" title/year from the filename/path. */
+  g_free(film->title);
+  film->title = NULL;
+  film->year = 0;
+
+  if (film->media_type == MEDIA_TV_SEASON) {
+    gchar *parent = g_path_get_dirname(film->file_path ? film->file_path : "");
+    gchar *show_base = parent ? g_path_get_basename(parent) : NULL;
+    gchar *show_name = utils_normalize_title(show_base ? show_base : "");
+    g_free(show_base);
+    g_free(parent);
+
+    if (!show_name || strlen(show_name) == 0) {
+      g_free(show_name);
+      show_name = g_strdup("Unknown Show");
+    }
+
+    if (film->season_number == 0) {
+      film->title = g_strdup_printf("%s - Specials", show_name);
+    } else {
+      if (film->season_number < 0)
+        film->season_number = 1;
+      film->title = g_strdup_printf("%s - Season %d", show_name,
+                                    film->season_number);
+    }
+    g_free(show_name);
+  } else {
+    gchar *base = g_path_get_basename(film->file_path ? film->file_path : "");
+    gchar *parsed_title = NULL;
+    gint parsed_year = 0;
+    if (base && scanner_parse_filename(base, &parsed_title, &parsed_year) &&
+        parsed_title && *parsed_title) {
+      film->title = parsed_title;
+      film->year = parsed_year;
+    } else {
+      g_free(parsed_title);
+      film->title = utils_normalize_title(base ? base : "Unknown");
+      film->year = 0;
+    }
+    g_free(base);
+  }
+
+  db_film_update(app, film);
+  film_free(film);
 }

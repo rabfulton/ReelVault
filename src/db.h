@@ -21,6 +21,9 @@ void db_close(ReelApp *app);
 gboolean db_film_insert(ReelApp *app, Film *film);
 gboolean db_film_update(ReelApp *app, const Film *film);
 gboolean db_film_delete(ReelApp *app, gint64 film_id);
+
+/* Remove all scraped associations (genres/cast/crew) for a film/season. */
+gboolean db_film_clear_associations(ReelApp *app, gint64 film_id);
 Film *db_film_get_by_id(ReelApp *app, gint64 film_id);
 Film *db_film_get_by_path(ReelApp *app, const gchar *file_path);
 

@@ -233,6 +233,34 @@ gboolean db_film_delete(ReelApp *app, gint64 film_id) {
   return rc == SQLITE_DONE;
 }
 
+gboolean db_film_clear_associations(ReelApp *app, gint64 film_id) {
+  if (!app || !app->db)
+    return FALSE;
+
+  const char *sqls[] = {
+      "DELETE FROM film_genres WHERE film_id=?",
+      "DELETE FROM film_actors WHERE film_id=?",
+      "DELETE FROM film_directors WHERE film_id=?",
+      NULL,
+  };
+
+  for (int i = 0; sqls[i] != NULL; i++) {
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(app->db, sqls[i], -1, &stmt, NULL) != SQLITE_OK) {
+      if (stmt)
+        sqlite3_finalize(stmt);
+      return FALSE;
+    }
+    sqlite3_bind_int64(stmt, 1, film_id);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE)
+      return FALSE;
+  }
+
+  return TRUE;
+}
+
 static Film *film_from_row(sqlite3_stmt *stmt) {
   Film *film = film_new();
 

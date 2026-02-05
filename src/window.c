@@ -607,6 +607,12 @@ void window_refresh_films(ReelApp *app) {
     app->films = NULL;
   }
   grid_clear(app);
+  if (app->grid_scrolled) {
+    GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment(
+        GTK_SCROLLED_WINDOW(app->grid_scrolled));
+    if (adj)
+      gtk_adjustment_set_value(adj, 0.0);
+  }
   app->grid_posters_loaded = 0;
   maybe_malloc_trim();
 

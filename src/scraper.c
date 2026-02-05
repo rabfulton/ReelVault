@@ -343,6 +343,10 @@ static gboolean fetch_tv_season_details(ReelApp *app, Film *film,
     return FALSE;
 
   struct json_object *val;
+  const char *season_name = NULL;
+  if (json_object_object_get_ex(root, "name", &val)) {
+    season_name = json_object_get_string(val);
+  }
 
   if (json_object_object_get_ex(root, "overview", &val)) {
     const char *overview = json_object_get_string(val);
@@ -356,6 +360,45 @@ static gboolean fetch_tv_season_details(ReelApp *app, Film *film,
     const char *date = json_object_get_string(val);
     if (date && strlen(date) >= 4)
       film->year = atoi(date);
+  }
+
+  /* Prefer a stable "Show Name - Season X" title. Season endpoint doesn't
+     include the show name, so fetch it separately. */
+  if (app->tmdb_api_key) {
+    gchar *show_url =
+        g_strdup_printf("%s/tv/%d?api_key=%s", TMDB_API_BASE, show_id,
+                        app->tmdb_api_key);
+    char *show_json = http_get(show_url);
+    g_free(show_url);
+
+    if (show_json) {
+      struct json_object *show_root = json_tokener_parse(show_json);
+      g_free(show_json);
+      if (show_root) {
+        const char *show_name = NULL;
+        if (json_object_object_get_ex(show_root, "name", &val)) {
+          show_name = json_object_get_string(val);
+        }
+
+        if (show_name && *show_name) {
+          const char *sn = (season_name && *season_name) ? season_name : NULL;
+          gchar *fallback = NULL;
+          if (!sn) {
+            if (film->season_number == 0) {
+              sn = "Specials";
+            } else {
+              fallback = g_strdup_printf("Season %d", film->season_number);
+              sn = fallback;
+            }
+          }
+
+          g_free(film->title);
+          film->title = g_strdup_printf("%s - %s", show_name, sn);
+          g_free(fallback);
+        }
+        json_object_put(show_root);
+      }
+    }
   }
 
   /* Poster */
@@ -661,6 +704,7 @@ typedef struct {
   gint total;
   gint done;
   gint pending_callbacks;
+  gboolean genres_updated;
 } ScraperContext;
 
 static ScraperContext *active_scraper = NULL;
@@ -688,6 +732,9 @@ static gboolean scraper_done_idle(gpointer data) {
     return G_SOURCE_CONTINUE;
   }
   gboolean canceled = !ctx->running;
+  if (ctx->genres_updated && ctx->app) {
+    ctx->app->genres_dirty = TRUE;
+  }
   if (ctx->done_cb) {
     ctx->done_cb(ctx->app, canceled, ctx->user_data);
   }
@@ -754,6 +801,7 @@ static gpointer scraper_thread_func(gpointer data) {
 
       if (good_match) {
         scraper_fetch_and_update(&thread_app, film->id, first->tmdb_id);
+        ctx->genres_updated = TRUE;
       }
 
       g_list_free_full(results, (GDestroyNotify)tmdb_search_result_free);
