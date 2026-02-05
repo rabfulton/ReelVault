@@ -380,6 +380,27 @@ static gboolean fetch_tv_season_details(ReelApp *app, Film *film,
           show_name = json_object_get_string(val);
         }
 
+        /* Copy show-level genres onto this season so genre filtering works for TV. */
+        struct json_object *show_genres = NULL;
+        if (json_object_object_get_ex(show_root, "genres", &show_genres) &&
+            show_genres) {
+          int glen = json_object_array_length(show_genres);
+          for (int i = 0; i < glen; i++) {
+            struct json_object *genre =
+                json_object_array_get_idx(show_genres, i);
+            if (!genre)
+              continue;
+            struct json_object *name_val = NULL;
+            if (json_object_object_get_ex(genre, "name", &name_val)) {
+              const char *gname = json_object_get_string(name_val);
+              if (gname && *gname) {
+                db_genre_add_to_film(app, film->id, gname);
+                app->genres_dirty = TRUE;
+              }
+            }
+          }
+        }
+
         if (show_name && *show_name) {
           const char *sn = (season_name && *season_name) ? season_name : NULL;
           gchar *fallback = NULL;

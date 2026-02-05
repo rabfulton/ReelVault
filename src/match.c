@@ -56,6 +56,7 @@ static gboolean apply_match_done_idle(gpointer data) {
 
   GtkWidget *dialog = g_weak_ref_get(&task->dialog_ref);
   if (task->success) {
+    task->app->genres_dirty = TRUE;
     window_refresh_film(task->app, task->film_id);
     if (dialog) {
       gtk_dialog_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
