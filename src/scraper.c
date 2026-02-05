@@ -361,12 +361,13 @@ static gboolean fetch_tv_season_details(ReelApp *app, Film *film,
   /* Poster */
   if (json_object_object_get_ex(root, "poster_path", &val)) {
     const char *poster_path = json_object_get_string(val);
-    /* Use film->id for local filename to avoid collisions with show vs season
-     * vs movie ID space */
+    /* Use a namespaced filename to avoid collisions with movie IDs and between
+     * seasons of the same show. */
     if (poster_path) {
       gchar *url = g_strdup_printf("%s/w500%s", TMDB_IMAGE_BASE, poster_path);
       gchar *dest = g_build_filename(
-          app->poster_cache_path, g_strdup_printf("%ld.jpg", film->id), NULL);
+          app->poster_cache_path,
+          g_strdup_printf("tv_%d_s%d.jpg", show_id, film->season_number), NULL);
       gboolean ok = download_file(url, dest);
       g_free(url);
 
@@ -374,7 +375,8 @@ static gboolean fetch_tv_season_details(ReelApp *app, Film *film,
         g_free(film->poster_path);
         film->poster_path = dest; /* Takes ownership */
         gchar *thumb = g_build_filename(
-            app->poster_cache_path, g_strdup_printf("%ld_thumb.jpg", film->id),
+            app->poster_cache_path,
+            g_strdup_printf("tv_%d_s%d_thumb.jpg", show_id, film->season_number),
             NULL);
         /* Always refresh thumb to avoid stale/wrong grid posters. */
         GError *thumb_err = NULL;
