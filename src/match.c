@@ -247,8 +247,15 @@ void match_show(ReelApp *app, gint64 film_id) {
   context_free(ctx);
   film_free(film);
 
-  /* Refresh main window */
-  window_refresh_films(app);
+  /* Refresh main window:
+     - For successful matches, refresh just the item to avoid wiping the
+       current search results (a new title may no longer match the query).
+     - For "no match" resets, refresh the full grid to reapply filters. */
+  if (response == GTK_RESPONSE_REJECT) {
+    window_refresh_films(app);
+  } else if (response == GTK_RESPONSE_ACCEPT) {
+    window_refresh_film(app, film_id);
+  }
 }
 
 static void clear_results(MatchDialogContext *ctx) {
