@@ -252,21 +252,24 @@ void detail_show(ReelApp *app, gint64 film_id) {
   gtk_box_pack_start(GTK_BOX(hbox), info_box, TRUE, TRUE, 0);
 
   /* Title + Year */
+  gchar *safe_film_title =
+      g_markup_escape_text(film->title ? film->title : "Unknown", -1);
   gchar *title_text;
   if (film->year > 0) {
     title_text =
         g_strdup_printf("<span size='x-large' weight='bold'>%s</span> <span "
                         "size='large'>(%d)</span>",
-                        film->title ? film->title : "Unknown", film->year);
+                        safe_film_title, film->year);
   } else {
     title_text = g_strdup_printf("<span size='x-large' weight='bold'>%s</span>",
-                                 film->title ? film->title : "Unknown");
+                                 safe_film_title);
   }
   GtkWidget *title_label = gtk_label_new(NULL);
   gtk_label_set_markup(GTK_LABEL(title_label), title_text);
   gtk_label_set_xalign(GTK_LABEL(title_label), 0);
   gtk_box_pack_start(GTK_BOX(info_box), title_label, FALSE, FALSE, 0);
   g_free(title_text);
+  g_free(safe_film_title);
 
   /* Rating + Runtime + Genres */
   GString *meta = g_string_new("");
@@ -315,7 +318,10 @@ void detail_show(ReelApp *app, gint64 film_id) {
       DbPerson *person = (DbPerson *)l->data;
       if (l != directors)
         g_string_append(dir_str, ", ");
-      g_string_append(dir_str, person->name);
+      gchar *safe_name = g_markup_escape_text(person->name ? person->name : "",
+                                              -1);
+      g_string_append(dir_str, safe_name);
+      g_free(safe_name);
     }
 
     GtkWidget *dir_label = gtk_label_new(NULL);
@@ -392,14 +398,17 @@ void detail_show(ReelApp *app, gint64 film_id) {
         Episode *ep = (Episode *)l->data;
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
 
-        gchar *ep_text = g_strdup_printf("<b>%d.</b> %s", ep->episode_number,
-                                         ep->title ? ep->title : "Episode");
+        gchar *safe_title =
+            g_markup_escape_text(ep->title ? ep->title : "Episode", -1);
+        gchar *ep_text =
+            g_strdup_printf("<b>%d.</b> %s", ep->episode_number, safe_title);
         GtkWidget *lbl = gtk_label_new(NULL);
         gtk_label_set_markup(GTK_LABEL(lbl), ep_text);
         gtk_label_set_xalign(GTK_LABEL(lbl), 0);
         gtk_label_set_ellipsize(GTK_LABEL(lbl), PANGO_ELLIPSIZE_END);
         gtk_box_pack_start(GTK_BOX(row), lbl, TRUE, TRUE, 0);
         g_free(ep_text);
+        g_free(safe_title);
 
         GtkWidget *play_ep = gtk_button_new_from_icon_name(
             "media-playback-start-symbolic", GTK_ICON_SIZE_BUTTON);

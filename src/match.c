@@ -170,13 +170,18 @@ void match_show(ReelApp *app, gint64 film_id) {
 
   /* File info */
   GtkWidget *file_label = gtk_label_new(NULL);
+  gchar *file_basename = g_path_get_basename(film->file_path);
+  gchar *safe_file_basename =
+      g_markup_escape_text(file_basename ? file_basename : "", -1);
   gchar *file_markup =
-      g_strdup_printf("<b>File:</b> %s", g_path_get_basename(film->file_path));
+      g_strdup_printf("<b>File:</b> %s", safe_file_basename);
   gtk_label_set_markup(GTK_LABEL(file_label), file_markup);
   gtk_label_set_xalign(GTK_LABEL(file_label), 0);
   gtk_label_set_ellipsize(GTK_LABEL(file_label), PANGO_ELLIPSIZE_MIDDLE);
   gtk_box_pack_start(GTK_BOX(content), file_label, FALSE, FALSE, 0);
   g_free(file_markup);
+  g_free(safe_file_basename);
+  g_free(file_basename);
 
   /* Search box */
   GtkWidget *search_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
