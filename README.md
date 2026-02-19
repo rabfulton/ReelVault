@@ -50,6 +50,10 @@ On first run, you'll be prompted to:
 
 The config file is stored here: `~/.config/reelvault/config.ini`
 
+You can also set the TMDB metadata language in **Settings** using a locale code
+such as `en-US`, `es-ES`, or `fr-FR`. If left blank, ReelVault defaults to
+`en-US`.
+
 ## Advanced Search
 
 The search bar supports simple `key:value` tokens:

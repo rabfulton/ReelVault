@@ -87,6 +87,7 @@ int main(int argc, char *argv[]) {
 ReelApp *reel_app_new(void) {
   ReelApp *app = g_new0(ReelApp, 1);
   filter_state_init(&app->filter);
+  app->tmdb_language = g_strdup(TMDB_DEFAULT_LANGUAGE);
   app->player_command = g_strdup("xdg-open");
   return app;
 }
@@ -102,6 +103,7 @@ void reel_app_free(ReelApp *app) {
   g_free(app->cache_path);
   g_free(app->poster_cache_path);
   g_free(app->tmdb_api_key);
+  g_free(app->tmdb_language);
   g_free(app->player_command);
   g_free(app->gtk_theme_name);
   g_free(app->system_gtk_theme_name);

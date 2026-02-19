@@ -7,6 +7,24 @@
 #include <stdio.h>
 #include <string.h>
 
+static gchar *normalize_tmdb_language(const gchar *language) {
+  gchar *normalized = g_strdup(language ? language : "");
+  g_strstrip(normalized);
+
+  for (gchar *p = normalized; *p; p++) {
+    if (*p == '_') {
+      *p = '-';
+    }
+  }
+
+  if (normalized[0] == '\0') {
+    g_free(normalized);
+    return g_strdup(TMDB_DEFAULT_LANGUAGE);
+  }
+
+  return normalized;
+}
+
 gboolean config_load(ReelApp *app) {
   GKeyFile *keyfile = g_key_file_new();
   GError *error = NULL;
@@ -24,6 +42,13 @@ gboolean config_load(ReelApp *app) {
   if (api_key) {
     g_free(app->tmdb_api_key);
     app->tmdb_api_key = api_key;
+  }
+
+  /* TMDB language */
+  gchar *language = g_key_file_get_string(keyfile, "tmdb", "language", NULL);
+  if (language) {
+    config_set_tmdb_language(app, language);
+    g_free(language);
   }
 
   /* Player command */
@@ -100,6 +125,9 @@ gboolean config_save(ReelApp *app) {
   if (app->tmdb_api_key) {
     g_key_file_set_string(keyfile, "tmdb", "api_key", app->tmdb_api_key);
   }
+  g_key_file_set_string(keyfile, "tmdb", "language",
+                        app->tmdb_language ? app->tmdb_language
+                                           : TMDB_DEFAULT_LANGUAGE);
 
   /* Player command */
   if (app->player_command) {
@@ -155,6 +183,11 @@ gboolean config_save(ReelApp *app) {
 void config_set_api_key(ReelApp *app, const gchar *api_key) {
   g_free(app->tmdb_api_key);
   app->tmdb_api_key = g_strdup(api_key);
+}
+
+void config_set_tmdb_language(ReelApp *app, const gchar *language) {
+  g_free(app->tmdb_language);
+  app->tmdb_language = normalize_tmdb_language(language);
 }
 
 void config_set_player_command(ReelApp *app, const gchar *command) {

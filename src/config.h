@@ -11,6 +11,7 @@ gboolean config_save(ReelApp *app);
 
 /* Individual setting getters/setters */
 void config_set_api_key(ReelApp *app, const gchar *api_key);
+void config_set_tmdb_language(ReelApp *app, const gchar *language);
 void config_set_player_command(ReelApp *app, const gchar *command);
 void config_add_library_path(ReelApp *app, const gchar *path);
 void config_remove_library_path(ReelApp *app, const gchar *path);

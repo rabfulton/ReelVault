@@ -162,6 +162,40 @@ static gchar *clean_tmdb_query(const gchar *query) {
   return normalized;
 }
 
+static gchar *tmdb_encoded_language(ReelApp *app) {
+  const gchar *configured =
+      (app && app->tmdb_language && strlen(app->tmdb_language) > 0)
+          ? app->tmdb_language
+          : TMDB_DEFAULT_LANGUAGE;
+  gchar *normalized = g_strdup(configured);
+  g_strstrip(normalized);
+  for (gchar *p = normalized; *p; p++) {
+    if (*p == '_') {
+      *p = '-';
+    }
+  }
+  if (normalized[0] == '\0') {
+    g_free(normalized);
+    normalized = g_strdup(TMDB_DEFAULT_LANGUAGE);
+  }
+
+  CURL *curl = curl_easy_init();
+  if (!curl) {
+    return normalized;
+  }
+
+  char *encoded = curl_easy_escape(curl, normalized, 0);
+  curl_easy_cleanup(curl);
+  if (!encoded) {
+    return normalized;
+  }
+
+  gchar *ret = g_strdup(encoded);
+  curl_free(encoded);
+  g_free(normalized);
+  return ret;
+}
+
 GList *scraper_search_tmdb(ReelApp *app, const gchar *query, gint year) {
   if (!app->tmdb_api_key || strlen(app->tmdb_api_key) == 0) {
     g_printerr("No TMDB API key configured\n");
@@ -181,15 +215,19 @@ GList *scraper_search_tmdb(ReelApp *app, const gchar *query, gint year) {
 
   /* Build URL */
   gchar *url;
+  gchar *encoded_language = tmdb_encoded_language(app);
   if (year > 0) {
     url =
-        g_strdup_printf("%s/search/movie?api_key=%s&query=%s&year=%d",
-                        TMDB_API_BASE, app->tmdb_api_key, encoded_query, year);
+        g_strdup_printf("%s/search/movie?api_key=%s&query=%s&year=%d&language=%s",
+                        TMDB_API_BASE, app->tmdb_api_key, encoded_query, year,
+                        encoded_language);
   } else {
-    url = g_strdup_printf("%s/search/movie?api_key=%s&query=%s", TMDB_API_BASE,
-                          app->tmdb_api_key, encoded_query);
+    url = g_strdup_printf("%s/search/movie?api_key=%s&query=%s&language=%s",
+                          TMDB_API_BASE, app->tmdb_api_key, encoded_query,
+                          encoded_language);
   }
   curl_free(encoded_query);
+  g_free(encoded_language);
 
   /* Fetch results */
   char *json_str = http_get(url);
@@ -270,15 +308,19 @@ GList *scraper_search_tv(ReelApp *app, const gchar *query, gint year) {
   g_free(clean_query);
 
   gchar *url;
+  gchar *encoded_language = tmdb_encoded_language(app);
   if (year > 0) {
     url = g_strdup_printf(
-        "%s/search/tv?api_key=%s&query=%s&first_air_date_year=%d",
-        TMDB_API_BASE, app->tmdb_api_key, encoded_query, year);
+        "%s/search/tv?api_key=%s&query=%s&first_air_date_year=%d&language=%s",
+        TMDB_API_BASE, app->tmdb_api_key, encoded_query, year,
+        encoded_language);
   } else {
-    url = g_strdup_printf("%s/search/tv?api_key=%s&query=%s", TMDB_API_BASE,
-                          app->tmdb_api_key, encoded_query);
+    url = g_strdup_printf("%s/search/tv?api_key=%s&query=%s&language=%s",
+                          TMDB_API_BASE, app->tmdb_api_key, encoded_query,
+                          encoded_language);
   }
   curl_free(encoded_query);
+  g_free(encoded_language);
 
   char *json_str = http_get(url);
   g_free(url);
@@ -329,11 +371,15 @@ GList *scraper_search_tv(ReelApp *app, const gchar *query, gint year) {
 
 static gboolean fetch_tv_season_details(ReelApp *app, Film *film,
                                         gint show_id) {
-  gchar *url = g_strdup_printf("%s/tv/%d/season/%d?api_key=%s", TMDB_API_BASE,
-                               show_id, film->season_number, app->tmdb_api_key);
+  gchar *encoded_language = tmdb_encoded_language(app);
+  gchar *url =
+      g_strdup_printf("%s/tv/%d/season/%d?api_key=%s&language=%s", TMDB_API_BASE,
+                      show_id, film->season_number, app->tmdb_api_key,
+                      encoded_language);
 
   char *json_str = http_get(url);
   g_free(url);
+  g_free(encoded_language);
   if (!json_str)
     return FALSE;
 
@@ -365,11 +411,13 @@ static gboolean fetch_tv_season_details(ReelApp *app, Film *film,
   /* Prefer a stable "Show Name - Season X" title. Season endpoint doesn't
      include the show name, so fetch it separately. */
   if (app->tmdb_api_key) {
+    gchar *encoded_show_language = tmdb_encoded_language(app);
     gchar *show_url =
-        g_strdup_printf("%s/tv/%d?api_key=%s", TMDB_API_BASE, show_id,
-                        app->tmdb_api_key);
+        g_strdup_printf("%s/tv/%d?api_key=%s&language=%s", TMDB_API_BASE,
+                        show_id, app->tmdb_api_key, encoded_show_language);
     char *show_json = http_get(show_url);
     g_free(show_url);
+    g_free(encoded_show_language);
 
     if (show_json) {
       struct json_object *show_root = json_tokener_parse(show_json);
@@ -523,9 +571,12 @@ gboolean scraper_fetch_and_update(ReelApp *app, gint64 film_id, gint tmdb_id) {
   }
 
   /* Fetch movie details with credits */
+  gchar *encoded_language = tmdb_encoded_language(app);
   gchar *url =
-      g_strdup_printf("%s/movie/%d?api_key=%s&append_to_response=credits",
-                      TMDB_API_BASE, tmdb_id, app->tmdb_api_key);
+      g_strdup_printf("%s/movie/%d?api_key=%s&append_to_response=credits&language=%s",
+                      TMDB_API_BASE, tmdb_id, app->tmdb_api_key,
+                      encoded_language);
+  g_free(encoded_language);
 
   char *json_str = http_get(url);
   g_free(url);

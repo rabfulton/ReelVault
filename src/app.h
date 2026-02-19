@@ -11,6 +11,7 @@
 #define CACHE_DIR_NAME "reelvault"
 #define DB_FILENAME "library.db"
 #define CONFIG_FILENAME "config.ini"
+#define TMDB_DEFAULT_LANGUAGE "en-US"
 
 /* Poster dimensions (base at 96 DPI, scaled at runtime) */
 #define POSTER_BASE_WIDTH 150
@@ -107,6 +108,7 @@ struct _ReelApp {
   gchar *cache_path;
   gchar *poster_cache_path;
   gchar *tmdb_api_key;
+  gchar *tmdb_language; /* TMDB metadata language, e.g. en-US */
   gchar *player_command;
   gchar **library_paths;
   gint library_paths_count;

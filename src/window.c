@@ -1050,14 +1050,27 @@ void window_show_settings(ReelApp *app) {
   GtkWidget *api_frame = gtk_frame_new("TMDB API Key");
   gtk_box_pack_start(GTK_BOX(content), api_frame, FALSE, FALSE, 0);
 
+  GtkWidget *api_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+  gtk_container_add(GTK_CONTAINER(api_frame), api_box);
+  gtk_container_set_border_width(GTK_CONTAINER(api_frame), 6);
+
   GtkWidget *api_entry = gtk_entry_new();
   gtk_entry_set_placeholder_text(GTK_ENTRY(api_entry),
                                  "Enter your TMDB API key");
   if (app->tmdb_api_key) {
     gtk_entry_set_text(GTK_ENTRY(api_entry), app->tmdb_api_key);
   }
-  gtk_container_add(GTK_CONTAINER(api_frame), api_entry);
-  gtk_container_set_border_width(GTK_CONTAINER(api_frame), 6);
+  gtk_box_pack_start(GTK_BOX(api_box), api_entry, FALSE, FALSE, 0);
+
+  GtkWidget *language_entry = gtk_entry_new();
+  gtk_entry_set_placeholder_text(
+      GTK_ENTRY(language_entry),
+      "Metadata language code (e.g., en-US, es-ES, fr-FR)");
+  gtk_entry_set_text(GTK_ENTRY(language_entry),
+                     (app->tmdb_language && strlen(app->tmdb_language) > 0)
+                         ? app->tmdb_language
+                         : TMDB_DEFAULT_LANGUAGE);
+  gtk_box_pack_start(GTK_BOX(api_box), language_entry, FALSE, FALSE, 0);
 
   /* Player Command */
   GtkWidget *player_frame = gtk_frame_new("Video Player");
@@ -1127,6 +1140,7 @@ void window_show_settings(ReelApp *app) {
   if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
     /* Save settings */
     const gchar *api_text = gtk_entry_get_text(GTK_ENTRY(api_entry));
+    const gchar *language_text = gtk_entry_get_text(GTK_ENTRY(language_entry));
     const gchar *player_text = gtk_entry_get_text(GTK_ENTRY(player_entry));
     const gchar *scheme_selected =
         gtk_combo_box_get_active_id(GTK_COMBO_BOX(scheme_combo));
@@ -1155,6 +1169,7 @@ void window_show_settings(ReelApp *app) {
       g_free(app->tmdb_api_key);
       app->tmdb_api_key = g_strdup(api_text);
     }
+    config_set_tmdb_language(app, language_text);
 
     if (player_text && strlen(player_text) > 0) {
       g_free(app->player_command);
