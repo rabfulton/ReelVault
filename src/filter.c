@@ -59,6 +59,10 @@ GtkWidget *filter_bar_create(ReelApp *app) {
   gtk_size_group_add_widget(side_group, right);
   g_object_unref(side_group);
 
+  /* Keep right-column controls flush-right while preserving equal side widths. */
+  GtkWidget *right_spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_box_pack_start(GTK_BOX(right), right_spacer, TRUE, TRUE, 0);
+
   /* Centered search entry */
   GtkWidget *search_entry = gtk_search_entry_new();
   gtk_entry_set_placeholder_text(GTK_ENTRY(search_entry), "Search films...");

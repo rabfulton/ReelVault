@@ -759,7 +759,9 @@ GList *db_genres_get_for_film(ReelApp *app, gint64 film_id) {
 }
 
 GList *db_genres_get_all(ReelApp *app) {
-  const char *sql = "SELECT DISTINCT name FROM genres ORDER BY name";
+  const char *sql = "SELECT DISTINCT g.name FROM genres g"
+                    " JOIN film_genres fg ON g.id = fg.genre_id"
+                    " ORDER BY g.name";
 
   sqlite3_stmt *stmt;
   GList *genres = NULL;

@@ -196,6 +196,18 @@ static gchar *tmdb_encoded_language(ReelApp *app) {
   return ret;
 }
 
+static void scraper_reset_film_associations(ReelApp *app, gint64 film_id) {
+  if (!app)
+    return;
+  if (!db_film_clear_associations(app, film_id)) {
+    g_printerr("Failed to clear existing associations for film %ld\n",
+               (long)film_id);
+  }
+  /* Clearing links can remove genres from active filters even before we add
+     replacement values from the new fetch. */
+  app->genres_dirty = TRUE;
+}
+
 GList *scraper_search_tmdb(ReelApp *app, const gchar *query, gint year) {
   if (!app->tmdb_api_key || strlen(app->tmdb_api_key) == 0) {
     g_printerr("No TMDB API key configured\n");
@@ -423,6 +435,10 @@ static gboolean fetch_tv_season_details(ReelApp *app, Film *film,
       struct json_object *show_root = json_tokener_parse(show_json);
       g_free(show_json);
       if (show_root) {
+        /* Replace any previously linked associations with this fetch's
+           localized data. */
+        scraper_reset_film_associations(app, film->id);
+
         const char *show_name = NULL;
         if (json_object_object_get_ex(show_root, "name", &val)) {
           show_name = json_object_get_string(val);
@@ -593,6 +609,10 @@ gboolean scraper_fetch_and_update(ReelApp *app, gint64 film_id, gint tmdb_id) {
     film_free(film);
     return FALSE;
   }
+
+  /* Replace previously linked scraped data so language re-fetches don't
+     accumulate stale genre/cast/crew values. */
+  scraper_reset_film_associations(app, film_id);
 
   /* Update film fields */
 
